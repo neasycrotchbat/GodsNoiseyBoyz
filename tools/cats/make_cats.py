@@ -2054,7 +2054,50 @@ def sequence(poses):
     return seq
 
 
-def main(only=None):
+def motion_match(poses):
+    """How well each dance-move frame flows into each frame of every other move.
+
+    Switching from clip A (showing frame i) to clip B at frame j looks smooth
+    when B[j] is close to where A was heading (A[i+1]) and moving the same way.
+    The director uses this to change moves without stopping: it jumps into the
+    next move at the frame that best carries the current motion through.
+    Costs are stored as bytes, A-major: data[((a * n + b) * 16 + i) * 16 + j].
+    """
+    import base64
+    ids = [cid for cid, c in CLIPS.items() if c["kind"] in ("move", "dj") and c["frames"] == 16]
+    lin = ("px", "py", "hx", "hy", "lfx", "rfx", "llift", "rlift")
+    rotk = (("lean", 0.25), ("tilt", 0.25))
+
+    def wrap(d):
+        return (d + 180) % 360 - 180
+
+    def diff(p, q):
+        """Weighted distance between two poses (or two pose velocities)."""
+        s = sum(abs(p[k] - q[k]) for k in lin)
+        s += sum(abs(p[k] - q[k]) * w for k, w in rotk)
+        s += sum(abs(wrap(p[k] - q[k])) * 0.12 for k in ANGLES)
+        return s
+
+    def vel(seq, k):
+        a, b = seq[k], seq[(k + 1) % len(seq)]
+        v = {key: b[key] - a[key] for key in lin + ("lean", "tilt")}
+        v.update({key: wrap(b[key] - a[key]) for key in ANGLES})
+        return v
+
+    P = {cid: poses[cid] for cid in ids}
+    V = {cid: [vel(P[cid], k) for k in range(16)] for cid in ids}
+    out = bytearray()
+    for a in ids:
+        for b in ids:
+            for i in range(16):
+                nxt = (i + 1) % 16
+                for j in range(16):
+                    cost = diff(P[a][nxt], P[b][j]) + 0.6 * diff(V[a][nxt], V[b][j])
+                    out.append(min(255, round(cost * 3)))
+    return {"clips": ids, "scale": 3, "data": base64.b64encode(bytes(out)).decode("ascii")}
+
+
+def main(only=None, manifest_only=False):
     sprites = os.path.join(OUT, "sprites")
     gifs = os.path.join(OUT, "gifs")
     os.makedirs(sprites, exist_ok=True)
@@ -2068,10 +2111,16 @@ def main(only=None):
         "cats": [],
     }
     poses = {cid: clip_poses(c) for cid, c in CLIPS.items()}
+    manifest["match"] = motion_match(poses)
     bg = hexc("#1e1830")
     lineup = []
     for cat in CATS:
         if only and cat["id"] not in only:
+            continue
+        if manifest_only:
+            manifest["cats"].append({"id": cat["id"], "name": cat["name"], "blurb": cat["blurb"],
+                                     "kind": cat.get("kind") or ("robot" if cat.get("bot") else "cat"),
+                                     "signature": cat["signature"], "dance": CLIPS[cat["signature"]]["name"]})
             continue
         sheet = Image.new("RGBA", (W * COLS, H * rows * len(VIEWS)), (0, 0, 0, 0))
         drawn = {}
@@ -2129,6 +2178,8 @@ def main(only=None):
     if not only:
         with open(os.path.join(OUT, "cats.json"), "w") as fh:
             json.dump(manifest, fh, indent=2)
+        if manifest_only:
+            return
         k, pad = 4, 4
         lw = (W * len(lineup) + pad * (len(lineup) + 1)) * k
         lh = (H + pad * 2) * k
@@ -2143,4 +2194,6 @@ def main(only=None):
 
 
 if __name__ == "__main__":
-    main(set(sys.argv[1:]) or None)
+    # --manifest: rewrite cats.json only (clips, motion matching), no drawing.
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    main(set(args) or None, manifest_only="--manifest" in sys.argv)

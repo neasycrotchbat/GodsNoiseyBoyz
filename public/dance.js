@@ -8,10 +8,14 @@
  *
  * When the song's tempo is known (looked up, or tapped by someone in the room)
  * everything locks to the beat: each move loop is one bar, moves change on
- * 2- and 4-bar phrases, the last two bars of every 16 are a crowd-wide drop
- * (everyone easing into the same move, a little out of step), and a wave
- * ripples across the floor every 32 bars. Without a tempo the same
+ * 2- and 4-bar phrases, the last four bars of every 16 are a crowd-wide drop
+ * (everyone flowing into the same move, then peeling off over 2-4 bars), and
+ * a wave ripples across the floor every 32 bars. Without a tempo the same
  * choreography runs on its own clock.
+ *
+ * Move changes keep their momentum: a precomputed motion-matching table says
+ * which frame of the next move best continues the current pose and motion, so
+ * an avatar jumps straight into it on a beat instead of stopping to reset.
  *
  * An avatar element opts in with data attributes (set by Dance.attach):
  *   data-cat     skin id (sprite sheet)
@@ -120,6 +124,45 @@
     return { clip: 'idle', view, flip: rand() < 0.5, spin: false, n: view !== 'front' ? 1 : 2 + Math.floor(rand() * 3), kind: 'rest' };
   }
 
+  // ---- motion matching: how well frame i of one move flows into frame j of
+  // another (built by make_cats.py). Lower is smoother; 255 means no data.
+  let MATCH = null;
+  const SMOOTH_ENOUGH = 200; // worse than this, the ready-stance tween looks better than a jump
+  function matchCost(a, i, b, j) {
+    if (!MATCH) return 255;
+    const ia = MATCH.index.get(a);
+    const ib = MATCH.index.get(b);
+    if (ia === undefined || ib === undefined) return 255;
+    return MATCH.bytes[((ia * MATCH.n + ib) * 16 + mod(i, 16)) * 16 + mod(j, 16)];
+  }
+  const matchable = (clip) => !!(MATCH && MATCH.index.has(clip));
+
+  // Changing moves without stopping: on one of the last four beats of the
+  // outgoing move, jump into the new move at the frame that best carries the
+  // motion on (beat-aligned when there's a tempo). Returns null if nothing
+  // flows well enough, and the ready-stance tween is used instead.
+  function bestSwitch(prev, s, boundary, tl) {
+    if (!matchable(prev.clip) || !matchable(s.clip)) return null;
+    const L = loopMs(prev.clip, tl.T);
+    const fm = L / 16;
+    let best = null;
+    for (const f of [15, 11, 7, 3]) {
+      const at = boundary - L + (f + 1) * fm;
+      if (at <= prev.start) continue;
+      const i = mod(f + prev.offset, 16);
+      const js = tl.T ? [0, 4, 8, 12].map((k) => mod(f + 1 + k, 16)) : [...Array(16).keys()];
+      for (const j of js) {
+        const cost = matchCost(prev.clip, i, s.clip, j);
+        if (!best || cost < best.cost) {
+          // Frames count from the phrase boundary, so the offset is how far
+          // ahead of that count the new move runs (whole beats with a tempo).
+          best = { cost, at, offset: mod(j - (f + 1), 16) };
+        }
+      }
+    }
+    return best && best.cost <= SMOOTH_ENOUGH ? best : null;
+  }
+
   const WINDOW = 10 * 60e3; // sequences with no song to anchor them restart every 10 minutes
   function timelineAt(mode, seed, skin, anchor, T, now) {
     const synced = T && mode !== 'chill' && mode !== 'sulk';
@@ -132,31 +175,49 @@
       timelines.set(key, tl);
     }
     const t = Math.max(0, now - base);
-    while (tl.end <= t) {
+    const ahead = 4 * (tl.T ? tl.T.bar : 2000); // a little lookahead for drop planning
+    while (tl.end <= t + ahead) {
       const prev = tl.segs[tl.segs.length - 1];
       const s = nextSegment(mode, tl.rand, prev, skin, tl.T);
-      // Tween: ease out of the previous clip to the ready stance, turn there
-      // if the facing changes, and ease into this one. Skipped when nothing changes.
-      const same = prev && prev.clip === s.clip && prev.view === s.view && prev.flip === s.flip;
-      s.pre = !same && prev && M.clips[prev.clip].out ? prev : null;
-      const frames = same || !M.clips[s.clip].in ? 0 : (s.pre ? M.clips[s.pre.clip].out.count : 0) + M.clips[s.clip].in.count;
+      const boundary = tl.end;
       const loops = s.n * loopMs(s.clip, tl.T);
-      if (tl.T) {
-        s.tweenMs = frames ? tl.T.beat : 0; // on the beat: the tween takes the phrase's first beat
-        s.dur = loops;
-      } else {
-        s.tweenMs = (frames * 1000) / tweenFps();
-        s.dur = loops + s.tweenMs;
+      Object.assign(s, { offset: 0, turnMs: 0, pre: null, tweenMs: 0, tweenFrames: 0, start: boundary });
+      const same = prev && prev.clip === s.clip && prev.view === s.view && prev.flip === s.flip;
+      const m = !same && prev && bestSwitch(prev, s, boundary, tl);
+      if (same) {
+        s.offset = prev.offset; // just carries on
+      } else if (m) {
+        // Flow straight into the new move; a change of facing becomes a quick
+        // turn through the side view while still moving.
+        s.start = m.at;
+        s.offset = m.offset;
+        if (prev.view !== s.view || prev.flip !== s.flip) s.turnMs = (loopMs(s.clip, tl.T) / 16) * 2;
+      } else if (prev) {
+        // No good match: ease out to the ready stance, turn there, ease in.
+        s.pre = M.clips[prev.clip].out ? prev : null;
+        s.tweenFrames = M.clips[s.clip].in ? (s.pre ? M.clips[s.pre.clip].out.count : 0) + M.clips[s.clip].in.count : 0;
+        s.tweenMs = !s.tweenFrames ? 0 : tl.T ? tl.T.beat : (s.tweenFrames * 1000) / tweenFps();
       }
-      s.tweenFrames = frames;
-      s.start = tl.end;
-      tl.end += s.dur;
+      const extra = !tl.T ? s.tweenMs : 0; // without a tempo the tween adds time; with one it takes the first beat
+      s.from = boundary + extra; // frames count from here (without a tempo); whole loops run to the end
+      tl.end = boundary + loops + extra;
+      s.dur = tl.end - s.start;
       tl.segs.push(s);
     }
+    return { tl, ...segIn(tl, t), t };
+  }
+  function segIn(tl, t) {
     for (let i = tl.segs.length - 1; i >= 0; i--) {
-      if (tl.segs[i].start <= t) return { tl, seg: tl.segs[i], dt: t - tl.segs[i].start, t };
+      if (tl.segs[i].start <= t) return { seg: tl.segs[i], dt: t - tl.segs[i].start };
     }
-    return { tl, seg: tl.segs[0], dt: t, t };
+    return { seg: tl.segs[0], dt: t };
+  }
+  // The clip and frame an avatar's own timeline shows at a moment (null mid-tween).
+  function ownFrameAt(tl, at) {
+    const { seg, dt } = segIn(tl, at - tl.base);
+    if (dt < seg.tweenMs) return null;
+    const c = M.clips[seg.clip];
+    return { clip: seg.clip, frame: mod(frameOf(seg.clip, tl.T, at, tl.base + seg.from, tl.base, seg.offset), c.count) };
   }
 
   function facing(seg, dt) {
@@ -182,14 +243,67 @@
     const c = M.clips[clip];
     showIdx(n, c.start + mod(frame, c.count), view, flip);
   }
-  // Frame of a clip: locked to the bar when there's a tempo, else counted from `from`.
-  function frameOf(clip, T, now, from, base) {
+  // Frame of a clip: locked to the bar when there's a tempo, else counted from
+  // `from`; `offset` shifts it (how a motion-matched switch lands mid-move).
+  function frameOf(clip, T, now, from, base, offset = 0) {
     const c = M.clips[clip];
     if (T && clip !== 'idle') {
       const L = loopMs(clip, T);
-      return Math.floor((mod(now - base, L) / L) * c.count);
+      return Math.floor((mod(now - base, L) / L) * c.count) + offset;
     }
-    return Math.floor(((now - from) * c.fps) / 1000);
+    return Math.floor(((now - from) * c.fps) / 1000) + offset;
+  }
+
+  // ---- drops: four bars before the end of every 16, the crowd falls into the
+  // same move. Each avatar picks the beat it flows in on and peels off back to
+  // its own moves somewhere in bars 2-4, where its motion carries best, so the
+  // crowd thins out over time. Plans are worked out once per drop and cached.
+  const DROP_CYCLE = 16;
+  const DROP_BARS = 4;
+  const dropPlans = new Map();
+  function planDrop(seed, tl, T, drop, t0) {
+    const key = `${seed}|${t0}|${drop}`;
+    let plan = dropPlans.get(key);
+    if (plan) return plan;
+    if (dropPlans.size > 800) dropPlans.clear();
+    const bar = T ? T.bar : 2000;
+    const beat = bar / 4;
+    const h = (s) => (hashStr(seed + '|' + s) % 1000) / 1000;
+    const withTempo = T && tl.T && matchable(drop);
+    const dropFrameAt = (at) => Math.floor((mod(at - T.base, bar) / bar) * 16);
+    // Join: the first-bar beat where the avatar's own motion flows best into the drop.
+    let join = t0 + Math.floor(h('join') * 4) * beat;
+    let easeIn = true;
+    if (withTempo) {
+      let best = null;
+      for (let k = 0; k < 4; k++) {
+        const at = t0 + k * beat;
+        const own = ownFrameAt(tl, at - beat / 4);
+        if (!own || !matchable(own.clip)) continue;
+        const cost = matchCost(own.clip, own.frame, drop, dropFrameAt(at)) + h('j' + k) * 25; // a little personality
+        if (!best || cost < best.cost) best = { cost, at };
+      }
+      if (best && best.cost <= SMOOTH_ENOUGH) { join = best.at; easeIn = false; }
+    }
+    // Leave: somewhere in bars 2-4, at the beat that flows best back into its own move.
+    const target = t0 + (2 + h('stay') * 2) * bar; // stays 2-4 bars
+    let leave = Math.min(t0 + DROP_BARS * bar, t0 + Math.round((target - t0) / beat) * beat);
+    let easeOut = true;
+    if (withTempo) {
+      let best = null;
+      for (let d = -2; d <= 2; d++) {
+        const at = Math.round((target - t0) / beat + d) * beat + t0;
+        if (at <= join + bar || at > t0 + DROP_BARS * bar) continue;
+        const own = ownFrameAt(tl, at);
+        if (!own || !matchable(own.clip)) continue;
+        const cost = matchCost(drop, dropFrameAt(at - beat / 4), own.clip, own.frame);
+        if (!best || cost < best.cost) best = { cost, at };
+      }
+      if (best && best.cost <= SMOOTH_ENOUGH) { leave = best.at; easeOut = false; }
+    }
+    plan = { join, leave, easeIn, easeOut };
+    dropPlans.set(key, plan);
+    return plan;
   }
 
   // Reactions and emotes ease in from the ready stance and back out to it.
@@ -219,9 +333,8 @@
     const { tl, seg, dt, t } = timelineAt(mode, seed, skin, anchor, T, now);
     const songOn = anchor && (mode === 'dance' || mode === 'groove');
 
-    // Crowd-wide moments while a song plays: the last two bars of every 16 are
-    // a drop where the whole crowd falls into the same move, and a wave
-    // ripples across the floor every 32 bars.
+    // Crowd-wide moments while a song plays: a drop near the end of every 16
+    // bars (see planDrop), and a wave across the floor every 32 bars.
     if (songOn) {
       const bar = T ? T.bar : 2000;
       const beat = bar / 4;
@@ -235,20 +348,16 @@
           return show(n, 'jump', Math.floor(((into - at) / beat) * M.clips.jump.count), 'front', false);
         }
       }
-      const cycle = 16;
-      const dropStart = k - mod(k, cycle) + cycle - 2; // first bar of this cycle's drop
-      if (k >= cycle - 2 && MOVES.length && (k === dropStart || k === dropStart + 1)) {
+      const dropStart = k - mod(k, DROP_CYCLE) + DROP_CYCLE - DROP_BARS; // first bar of this cycle's drop
+      if (k >= DROP_CYCLE - DROP_BARS && MOVES.length && k >= dropStart && k < dropStart + DROP_BARS) {
         const t0 = base + dropStart * bar;
         const drop = MOVES[hashStr(`drop|${base}|${dropStart}`) % MOVES.length];
-        // Not everyone at once: each avatar joins up to a beat late and some
-        // drift back to their own moves up to two beats early, easing in and out.
-        const join = t0 + (hashStr(seed + '|join') % 1000) / 1000 * beat;
-        const leave = t0 + 2 * bar - (hashStr(seed + '|leave') % 1000) / 1000 * beat * 2;
+        const { join, leave, easeIn, easeOut } = planDrop(seed, tl, T, drop, t0);
         const c = M.clips[drop];
         const ease = beat * 0.75;
         if (now >= join && now < leave) {
-          if (c.in && now < join + ease) return showIdx(n, c.in.start + Math.floor(((now - join) / ease) * c.in.count), 'front', false);
-          if (c.out && now >= leave - ease) return showIdx(n, c.out.start + Math.min(c.out.count - 1, Math.floor(((now - (leave - ease)) / ease) * c.out.count)), 'front', false);
+          if (easeIn && c.in && now < join + ease) return showIdx(n, c.in.start + Math.floor(((now - join) / ease) * c.in.count), 'front', false);
+          if (easeOut && c.out && now >= leave - ease) return showIdx(n, c.out.start + Math.min(c.out.count - 1, Math.floor(((now - (leave - ease)) / ease) * c.out.count)), 'front', false);
           return show(n, drop, Math.floor((mod(now - base, bar) / bar) * c.count), 'front', false);
         }
       }
@@ -265,8 +374,11 @@
       return showIdx(n, tin.start + Math.min(i, tin.count - 1), seg.view, seg.flip && !seg.spin);
     }
     const sinceTween = dt - seg.tweenMs;
-    const { view, flip } = facing(seg, sinceTween);
-    show(n, seg.clip, frameOf(seg.clip, tl.T, now, tl.base + seg.start + seg.tweenMs, tl.base), view, flip);
+    // A motion-matched switch that changes facing turns through the side view while moving.
+    const { view, flip } = seg.turnMs && sinceTween < seg.turnMs
+      ? { view: 'side', flip: !!seg.flip }
+      : facing(seg, sinceTween);
+    show(n, seg.clip, frameOf(seg.clip, tl.T, now, tl.base + seg.from, tl.base, seg.offset), view, flip);
   }
 
   const Dance = {
@@ -275,6 +387,12 @@
       MOVES = Object.keys(M.clips).filter((k) => M.clips[k].kind === 'move');
       DJ_MOVES = Object.keys(M.clips).filter((k) => M.clips[k].kind === 'dj');
       SIGNATURE = Object.fromEntries(M.cats.map((c) => [c.id, c.signature]));
+      if (M.match) {
+        const bin = atob(M.match.data);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        MATCH = { index: new Map(M.match.clips.map((c, i) => [c, i])), n: M.match.clips.length, bytes };
+      }
       const root = document.documentElement.style;
       root.setProperty('--frame-w', M.frameWidth + 'px');
       root.setProperty('--frame-h', M.frameHeight + 'px');
