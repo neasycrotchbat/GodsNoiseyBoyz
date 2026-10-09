@@ -66,7 +66,9 @@ Press `Win + R`, type `shell:startup`, and press Enter. Right-click in that fold
 
 ## Changing the cats
 
-Each cat is a 288×56 sprite sheet in `public/cats/`: six 48×56 frames, where frames 1–4 are the dance and 5–6 are the idle sway. Replace a PNG with your own art at the same size and it shows up right away. To add a new cat, add its sheet and an entry to `public/cats/cats.json`.
+Each cat is a sprite sheet in `public/cats/`: 24 frames of 64×80 in one row. Frames 1–16 are the cat's signature dance (played at 12 fps) and 17–24 are the idle sway with a blink. Frame size, counts and speeds come from `public/cats/cats.json`, so you can redraw a sheet by hand at the same size, or change the layout in the manifest. To add a new cat, add its sheet and an entry to `cats.json`.
+
+The five dances are Swing step (Biscuit), Side shuffle (Smokey), Knee-up groove (Midnight), Elbow bounce (Pepper) and Party stomp (Mochi). Their keyframes live in `tools/cats/make_cats.py`.
 
 ## Regenerating the cat art
 

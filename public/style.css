@@ -81,19 +81,20 @@ input:focus { border-color: var(--focus); outline: none; }
 .form-error { color: var(--lame); min-height: 1.4em; margin: 0; }
 
 /* ---------------- cats */
+:root { --frame-w: 64px; --frame-h: 80px; --frames: 24; }
 .cat {
-  --s: 2;
+  --s: 1.5;
   display: inline-block;
-  width: calc(48px * var(--s));
-  height: calc(56px * var(--s));
+  width: calc(var(--frame-w) * var(--s));
+  height: calc(var(--frame-h) * var(--s));
   background-repeat: no-repeat;
-  background-size: calc(288px * var(--s)) calc(56px * var(--s));
+  background-size: calc(var(--frame-w) * var(--frames) * var(--s)) calc(var(--frame-h) * var(--s));
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
-.cat-xs { --s: 0.5; vertical-align: middle; }
+.cat-xs { --s: 0.36; vertical-align: middle; }
 .cat-sm { --s: 1; }
-.cat-md { --s: 1.5; }
+.cat-md { --s: 1.25; }
 
 .cat-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; }
 .cat-option {
@@ -169,7 +170,7 @@ input:focus { border-color: var(--focus); outline: none; }
 .screen-wrap { padding: 1.2rem 16px 0; display: flex; justify-content: center; }
 .screen {
   position: relative;
-  width: min(720px, 100%, calc((100vh - 590px) * 1.78));
+  width: min(720px, 100%, calc((100vh - 620px) * 1.78));
   min-width: min(360px, 100%);
   aspect-ratio: 16 / 9;
   background: #000;
@@ -201,12 +202,12 @@ input:focus { border-color: var(--focus); outline: none; }
   transition: left 0.5s ease, opacity 0.4s;
 }
 .spotlight.on { opacity: 1; }
-.seats { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); align-items: end; height: 150px; }
+.seats { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); align-items: end; height: 190px; }
 .seat { position: relative; display: grid; justify-items: center; align-content: end; }
 .seat .nametag { position: absolute; top: -4px; }
 .seat-open {
   align-self: end;
-  margin-bottom: 52px;
+  margin-bottom: 40px;
   font: 600 0.9rem var(--display);
   color: var(--muted);
   border: 2px dashed var(--line);
@@ -218,8 +219,8 @@ input:focus { border-color: var(--focus); outline: none; }
 .seat-open:hover { color: var(--amber); border-color: var(--amber); }
 .booth {
   position: relative;
-  margin-top: -46px;
-  height: 58px;
+  margin-top: -24px;
+  height: 52px;
   background: linear-gradient(#4a3a6a, #33284b);
   border: 3px solid #120e1d;
   border-radius: 6px 6px 2px 2px;
@@ -396,8 +397,8 @@ input:focus { border-color: var(--focus); outline: none; }
   .cat-grid { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 560px) {
-  .seats { height: 120px; }
-  .seats .cat { --s: 1.4 !important; }
+  .seats { height: 130px; }
+  .seats .cat { --s: 1 !important; }
   .seat-open { font-size: 0.75rem; margin-bottom: 44px; }
   .platter { width: 20px; height: 20px; }
   .deck { gap: 4px; }

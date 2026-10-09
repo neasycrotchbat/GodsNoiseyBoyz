@@ -92,7 +92,7 @@ app.use((req, res, next) => {
 
 app.get('/api/me', (req, res) => {
   const user = verify(readCookie(req.headers.cookie));
-  res.json({ siteName: config.siteName, user: publicUser(user), cats: CATS.cats, hasApiKey: !!config.youtubeApiKey });
+  res.json({ siteName: config.siteName, user: publicUser(user), cats: CATS.cats, sprites: CATS, hasApiKey: !!config.youtubeApiKey });
 });
 
 app.post('/api/login', (req, res) => {

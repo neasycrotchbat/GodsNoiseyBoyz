@@ -51,15 +51,18 @@
     const cat = CATS.find((c) => c.id === catId);
     n.setAttribute('aria-label', cat ? cat.name : 'cat');
   }
+  let SPRITES = { frames: 24, animations: { dance: { start: 0, count: 16, fps: 12 }, idle: { start: 16, count: 8, fps: 5 } } };
   function tickCats() {
-    const t = performance.now();
+    const t = performance.now() / 1000;
+    const last = SPRITES.frames - 1;
     for (const n of document.querySelectorAll('.cat[data-cat]')) {
+      const a = SPRITES.animations[n.dataset.anim === 'dance' ? 'dance' : 'idle'];
       const seed = +n.dataset.seed || 0;
-      const f = n.dataset.anim === 'dance' ? Math.floor(t / 160 + seed) % 4 : 4 + (Math.floor(t / 420 + seed) % 2);
-      n.style.backgroundPosition = `${f * 20}% 0`;
+      const f = a.start + (Math.floor(t * a.fps + seed) % a.count);
+      n.style.backgroundPosition = `${(f / last) * 100}% 0`;
     }
   }
-  setInterval(tickCats, 80);
+  setInterval(tickCats, 40);
 
   function catGrid(container, selected, onPick) {
     container.replaceChildren();
@@ -68,7 +71,7 @@
       b.type = 'button';
       b.setAttribute('role', 'radio');
       b.setAttribute('aria-checked', String(c.id === selected));
-      b.title = c.blurb;
+      b.title = c.dance ? `${c.blurb}. Signature move: ${c.dance}.` : c.blurb;
       b.append(catNode(c.id, { size: 'sm', anim: c.id === selected ? 'dance' : 'idle', seed: hash(c.id) % 7 }), el('span', '', c.name));
       b.addEventListener('click', () => {
         for (const o of container.children) {
@@ -87,6 +90,13 @@
     const res = await fetch('/api/me', { credentials: 'same-origin' });
     const info = await res.json();
     CATS = info.cats;
+    if (info.sprites) {
+      SPRITES = info.sprites;
+      const root = document.documentElement.style;
+      root.setProperty('--frame-w', SPRITES.frameWidth + 'px');
+      root.setProperty('--frame-h', SPRITES.frameHeight + 'px');
+      root.setProperty('--frames', SPRITES.frames);
+    }
     hasApiKey = info.hasApiKey;
     document.title = info.siteName;
     for (const n of document.querySelectorAll('[data-site-name]')) n.textContent = info.siteName;
@@ -234,7 +244,7 @@
       seats.append(seat);
       decks.append(deck);
     }
-    for (const n of seats.querySelectorAll('.cat')) n.style.setProperty('--s', '2');
+    for (const n of seats.querySelectorAll('.cat')) n.style.setProperty('--s', '1.75');
     const spot = $('#spotlight');
     spot.classList.toggle('on', spotIndex >= 0);
     if (spotIndex >= 0) spot.style.left = `calc(16px + (100% - 32px) * ${(spotIndex + 0.5) / room.maxDjs})`;
@@ -243,13 +253,15 @@
     const crowd = $('#crowd');
     crowd.replaceChildren();
     const fans = room.listeners.filter((id) => !room.djs.includes(id));
-    fans.sort((a, b) => (hash(a) % 3) - (hash(b) % 3));
-    for (const id of fans) {
+    // Spread fans evenly across the floor in a stable order, staggering every other one back a row.
+    fans.sort((a, b) => hash(a) - hash(b));
+    fans.forEach((id, i) => {
       const h = hash(id);
-      const row = h % 3;
+      const row = i % 2;
+      const jitter = ((h >>> 5) % 7) - 3;
       const fan = el('div', 'fan');
-      fan.style.left = `${6 + ((h >>> 3) % 88)}%`;
-      fan.style.bottom = `${8 + row * 34}px`;
+      fan.style.left = `${8 + (84 * (i + 0.5)) / fans.length + jitter * 0.6}%`;
+      fan.style.bottom = `${6 + row * 30}px`;
       fan.style.zIndex = String(10 - row);
       const cat = catNode(userCat(id), { size: 'md', anim: awesomes.has(id) ? 'dance' : 'idle', seed: h % 11 });
       fan.append(cat, el('span', 'nametag', userName(id) + (id === me.id ? ' (you)' : '')));
@@ -259,7 +271,7 @@
       else if (lames.has(id)) bubble = ['Lame', 'bubble-lame'];
       if (bubble) fan.append(el('span', 'bubble ' + bubble[1], bubble[0]));
       crowd.append(fan);
-    }
+    });
 
     $('#online-count').textContent = `${room.listeners.length} here`;
     const inSeat = room.djs.includes(me.id);
@@ -646,7 +658,7 @@
       dot.title = online.has(u.id) ? 'In the room' : 'Away';
       name.append(dot);
       const cat = catNode(u.cat, { size: 'xs' });
-      cat.style.setProperty('--s', '0.65');
+      cat.style.setProperty('--s', '0.45');
       li.append(el('span', 'rank', String(i + 1)), cat, name, el('span', 'pts', String(u.points)));
       list.append(li);
     });
