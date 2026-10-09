@@ -52,7 +52,7 @@
     n.setAttribute('aria-label', cat ? cat.name : 'cat');
     Dance.attach(n, { skin: catId, mode, seed, anchor, face });
   }
-  const SPRITE_VERSION = 5;
+  const SPRITE_VERSION = 6;
 
   // The NPC crowd is the same for everyone: skins and spots come from fixed seeds.
   let npcs = [];
@@ -280,7 +280,9 @@
       } else {
         const inSeat = room.djs.includes(me.id);
         if (!inSeat) {
-          const b = el('button', 'seat-open', 'Take this seat');
+          const narrow = (seats.clientWidth || 600) / room.maxDjs < 110;
+          const b = el('button', 'seat-open', narrow ? '+ DJ' : 'Take this seat');
+          b.title = 'Take this seat';
           b.type = 'button';
           b.addEventListener('click', stepUp);
           seat.append(b);
@@ -289,7 +291,9 @@
       seats.append(seat);
       decks.append(deck);
     }
-    for (const n of seats.querySelectorAll('.cat')) n.style.setProperty('--s', '1.75');
+    // DJs scale with their seat, so on a wide video they stand tall in front of it.
+    const seatW = (seats.clientWidth || 600) / room.maxDjs;
+    $('.booth-area').style.setProperty('--dj-s', Math.max(0.9, Math.min(2.3, seatW / 92)).toFixed(2));
     const spot = $('#spotlight');
     spot.classList.toggle('on', spotIndex >= 0);
     if (spotIndex >= 0) spot.style.left = `calc(16px + (100% - 32px) * ${(spotIndex + 0.5) / room.maxDjs})`;
@@ -308,16 +312,18 @@
   // the back rows' heads over the booth. Three rows, biggest in front; real
   // people stand in the front row with their names over their heads, NPCs
   // fill in around and behind them. Everything scales with the floor's width.
+  // Rows hang from the top of the crowd (just under the booth), so a tall
+  // window shows more legs rather than opening a gap below the booth.
   const CROWD_ROWS = [
-    { s: 1.8, bottom: 95, spacing: 0.5 },   // back, dimmest
-    { s: 2.2, bottom: 45, spacing: 0.55 },  // middle
-    { s: 2.7, bottom: -55, spacing: 0.6 },  // front, cut off at the waist by the floor's edge
+    { s: 1.8, top: 4, spacing: 0.5 },    // back, heads over the decks, dimmest
+    { s: 2.2, top: 48, spacing: 0.55 },  // middle
+    { s: 2.7, top: 96, spacing: 0.6 },   // front, cut off by the floor's edge
   ];
   function renderCrowd(c, awesomes, lames, snags) {
     const crowd = $('#crowd');
     crowd.replaceChildren();
     const width = crowd.clientWidth || 700;
-    const k = Math.max(0.42, Math.min(1.15, width / 760));
+    const k = Math.max(0.42, Math.min(1.35, width / 760));
     crowd.style.setProperty('--k', k.toFixed(3));
     const cap = (row) => Math.max(1, Math.floor(width / (64 * CROWD_ROWS[row].s * k * CROWD_ROWS[row].spacing)));
     // The more Awesomes a song gets, the more NPCs dance; Lames calm them down.
@@ -338,7 +344,8 @@
         const shift = row === 1 ? 0.25 : row === 0 ? -0.25 : 0;
         const jitter = m.npc ? m.npc.jitter : (((hash(m.id) >>> 5) % 7) - 3) * 0.6;
         fan.style.left = `${3 + (94 * (i + 0.5 + shift)) / members.length + jitter}%`;
-        fan.style.bottom = `calc(${CROWD_ROWS[row].bottom}px * var(--k))`;
+        // People carry a name tag above their head; lift them so heads line up.
+        fan.style.top = `calc(${CROWD_ROWS[row].top}px * var(--k) - ${m.npc ? 0 : 16}px)`;
         fan.style.zIndex = String(row * 10 + (m.npc ? 0 : 5));
         fan.style.setProperty('--row-s', CROWD_ROWS[row].s);
         if (m.npc) {

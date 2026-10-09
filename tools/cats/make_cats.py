@@ -255,6 +255,10 @@ REST = dict(
     la=12.0, lf=4.0, ra=12.0, rf=4.0,          # arm angles: 0 down, 90 out, 180 up, 270 across chest
     lfx=-8.0, llift=0.0, rfx=8.0, rlift=0.0,   # feet: x offset from center, lift off the ground
     tail=0.0, eyes="happy", mouth="smile",
+    # Specials, filled in per frame from the beat (see clip_poses):
+    swing=0.0,   # extra tail swing in degrees (cats)
+    glow=0.0,    # 0..1 how lit the lights are (robots: antenna tips, eyes, visors, thrusters)
+    ext=0.0,     # 0..1 how far antennas are extended (robots)
 )
 ANGLES = {"la", "lf", "ra", "rf"}
 
@@ -270,27 +274,27 @@ def mirrored(p):
     return q
 
 
-def arm_points(shoulder, upper, fore, side):
+def arm_points(shoulder, upper, fore, side, l1=9.5, l2=8.5):
     """side = -1 for the screen-left arm, +1 for the screen-right arm."""
     def d(theta):
         r = math.radians(theta)
         return side * math.sin(r), math.cos(r)
     ux, uy = d(upper)
     fx, fy = d(fore)
-    elbow = (shoulder[0] + ux * 9.5, shoulder[1] + uy * 9.5)
-    paw = (elbow[0] + fx * 8.5, elbow[1] + fy * 8.5)
+    elbow = (shoulder[0] + ux * l1, shoulder[1] + uy * l1)
+    paw = (elbow[0] + fx * l2, elbow[1] + fy * l2)
     return elbow, paw
 
 
-def side_arm_points(shoulder, upper, fore):
+def side_arm_points(shoulder, upper, fore, l1=9.5, l2=8.5):
     """Profile view: sideways reach is foreshortened into a short forward reach."""
     def d(theta):
         r = math.radians(theta)
         return 0.5 * abs(math.sin(r)), math.cos(r)
     ux, uy = d(upper)
     fx, fy = d(fore)
-    elbow = (shoulder[0] + ux * 9.5, shoulder[1] + uy * 9.5)
-    paw = (elbow[0] + fx * 8.5, elbow[1] + fy * 8.5)
+    elbow = (shoulder[0] + ux * l1, shoulder[1] + uy * l1)
+    paw = (elbow[0] + fx * l2, elbow[1] + fy * l2)
     return elbow, paw
 
 
@@ -341,13 +345,13 @@ def draw_front(p, cat, back=False):
     def tail():
         if back:  # from behind it starts mid-back, low, and curls out to the side in front of the body
             base = W_(1.5, -1)
-            sw = p["tail"]
+            sw = p["tail"] + p["swing"]
             ctrl = (base[0] + 13 + 2 * math.sin(math.radians(sw)), base[1] + 3)
             tipx, tipy = rot(7, -15, sw)
             tip = (base[0] + 10 + tipx, base[1] - 1 + tipy)
         else:
             base = W_(8, -3)
-            sw = p["tail"]
+            sw = p["tail"] + p["swing"]
             ctrl = (base[0] + 11 + 2 * math.sin(math.radians(sw)), base[1] + 2)
             tipx, tipy = rot(9, -15, sw)
             tip = (base[0] + 6 + tipx, base[1] + tipy)
@@ -450,7 +454,7 @@ def draw_side(p, cat):
 
     # ---- tail, behind everything
     base = W_(-7.5, -3)
-    sw = p["tail"]
+    sw = p["tail"] + p["swing"]
     ctrl = (base[0] - 10 + 2 * math.sin(math.radians(sw)), base[1] + 1)
     tipx, tipy = rot(-7, -15, sw * 0.6)
     tip = (base[0] - 5 + tipx, base[1] + tipy)
@@ -530,6 +534,8 @@ def draw_side(p, cat):
 
 def draw_cat(pose, cat, view="front"):
     p = dict(REST, **pose)
+    if cat.get("bot"):
+        return draw_robot(p, cat["bot"], view)
     if view == "side":
         return draw_side(p, cat)
     if view == "back":
@@ -666,6 +672,324 @@ def scarf(cv, view, Hp, W_, hang):
     cv.group([chain([W_(-7.2, -23.4), W_(0, -21.6 if view == "front" else -23.4), W_(7.2, -23.4)], 2.4, knit)])
     tail_x = 4 if view == "front" else -4
     cv.group([poly([W_(tail_x - 2.2, -22), W_(tail_x - 2.8, -11.5), W_(tail_x + 1.8, -11.8), W_(tail_x + 2.4, -22)], knit)])
+
+
+# ------------------------------------------------------------------ robots
+# Robots ride the same skeleton and moves as the cats, with metal body kits.
+# Their special is light: antenna tips, eyes, visors and thrusters pulse with
+# the beat (pose "glow"), and antennas pump up and down (pose "ext").
+def rbox(F, x0, y0, x1, y1, color, cut=1.5, shade=True):
+    """A box with chamfered corners, in whatever frame F maps (body, head or screen)."""
+    pts = [(x0 + cut, y0), (x1 - cut, y0), (x1, y0 + cut), (x1, y1 - cut),
+           (x1 - cut, y1), (x0 + cut, y1), (x0, y1 - cut), (x0, y0 + cut)]
+    return poly([F(x, y) for x, y in pts], color, shade)
+
+
+def lamp(g):
+    return "lamp_on" if g > 0.6 else "lamp_dim" if g > 0.25 else "lamp_off"
+
+
+def eye_key(g):
+    return "eye_on" if g > 0.6 else "eye"
+
+
+def antenna(cv, F, x, y, ang, length, glow, r=0.65, bulb=1.7):
+    rad = math.radians(ang)
+    base, tip = F(x, y), F(x + length * math.sin(rad), y - length * math.cos(rad))
+    cv.group([chain([base, tip], r, "metal2", shade=False)])
+    cv.group([ellipse(tip[0], tip[1], bulb, bulb, lamp(glow), shade=False)])
+
+
+# ---- heads: (canvas, head->screen, view, pose, bot)
+def head_crt(cv, Hp, view, p, bot):
+    """Boxy: a CRT head with a dark screen, two red eyes and twin antennas."""
+    g, up = p["glow"], 4 + 5 * p["ext"]
+    if view == "side":
+        for x in (-3, 2):
+            antenna(cv, Hp, x, -10, -8, up, g)
+        cv.group([rbox(Hp, -8, -10, 9, 9, "metal", cut=3)], cast=True)
+        cv.group([rbox(Hp, 7, -6.5, 10, 6.5, "dark", cut=1, shade=False)])
+        cv.group([ellipse(*Hp(-1, 0), 2.6, 2.6, "metal2")])
+        return
+    for x in (-6, 7):
+        antenna(cv, Hp, x, -10, -6 if x < 0 else 6, up, g)
+    cv.group([rbox(Hp, -12, -10, 12, 9, "metal", cut=3)], cast=True)
+    cv.group([rbox(Hp, -14, -3, -11, 3, "metal2", cut=1)])  # side knob
+    if view == "back":
+        cv.group([pix([Hp(x, y) for x in (-6, -3, 0, 3, 6) for y in (-4, 0, 4)], "metal2")], inner=False)
+        return
+    cv.group([rbox(Hp, -8, -6.5, 10, 6.5, "dark", cut=2, shade=False)])
+    ek = eye_key(g)
+    if p["eyes"] == "blink":
+        cv.group([pix([Hp(x, 0.5) for x in (-3, -2, -1, 0, 4, 5, 6, 7)], ek)], inner=False)
+    else:
+        cv.group([ellipse(*Hp(-1.5, 0), 2.3, 2.3, ek, shade=False), ellipse(*Hp(5.5, 0), 2.3, 2.3, ek, shade=False)], inner=False)
+
+
+def head_tv(cv, Hp, view, p, bot):
+    """Pixel: a chunky TV head whose screen shows a pixel smiley."""
+    g, up = p["glow"], 3 + 5 * p["ext"]
+    if view == "side":
+        antenna(cv, Hp, 1, -11, 12, up, g)
+        cv.group([rbox(Hp, -9, -11, 9, 10, "acc", cut=2.5)], cast=True)
+        cv.group([rbox(Hp, 8, -8, 11, 8, "screen", cut=1, shade=False)])
+        cv.group([rbox(Hp, -3, -3, 1, 3, "dark", cut=1)])
+        return
+    antenna(cv, Hp, 5, -11, 15, up, g)
+    cv.group([rbox(Hp, -13, -11, 13, 10, "acc", cut=2.5)], cast=True)
+    cv.group([rbox(Hp, -16, -3.5, -13, 3.5, "dark", cut=1)])  # knob on the side
+    if view == "back":
+        cv.group([pix([Hp(x, y) for x in (-7, -4, -1, 2, 5, 8) for y in (-5, -1, 3)], "acc_s")], inner=False)
+        return
+    cv.group([rbox(Hp, -10, -8, 11, 8, "screen", cut=1.5, shade=False)])
+    face = "face_on" if g > 0.6 else "face"
+    if p["eyes"] == "blink":
+        eyes = [(-5, -1), (-4, -1), (4, -1), (5, -1)]
+    else:
+        eyes = [(-5, -2), (-4, -2), (-5, -1), (-4, -1), (4, -2), (5, -2), (4, -1), (5, -1)]
+    if p["mouth"] == "open":
+        mouth = [(-4, 2), (4, 2)] + [(x, 3) for x in range(-3, 4)] + [(x, 4) for x in range(-2, 3)]
+    else:
+        mouth = [(-4, 2), (4, 2)] + [(x, 3) for x in range(-3, 4)]
+    cv.group([pix([Hp(x + 0.5, y + 0.5) for x, y in eyes + mouth], face)], inner=False)
+
+
+def head_dome(cv, Hp, view, p, bot):
+    """Tidy: a maid bot's dome head, frilly headband and bulb 'ear' antennas."""
+    g, up = p["glow"], 2.5 + 3.5 * p["ext"]
+    if view == "side":
+        antenna(cv, Hp, -1, -6, -25, up + 1, g, bulb=2.0)
+        cv.group([ellipse(*Hp(0, 0), 9.2, 8.6, "metal", ang=0)], cast=True)
+        cv.group([chain([Hp(-6, -6.5), Hp(-1, -8.3), Hp(4, -7.2)], 1.5, "acc")])
+        cv.group([rbox(Hp, 2, -2.5, 9.6, 2.5, "dark", cut=1, shade=False)])
+        cv.group([ellipse(*Hp(6.5, 0), 1.6, 1.6, lamp(g), shade=False)], inner=False)
+        return
+    for s in (-1, 1):
+        antenna(cv, Hp, s * 9.5, -2, s * 60, up, g, bulb=2.0)
+    cv.group([ellipse(*Hp(0, 0), 10, 8.6, "metal")], cast=True)
+    cv.group([chain([Hp(-7.5, -5.5), Hp(0, -8.4), Hp(7.5, -5.5)], 1.6, "acc")])
+    cv.group([pix([Hp(x, -9.6) for x in (-4, -1, 2, 5)], "acc")], inner=False)  # frill
+    if view == "back":
+        return
+    cv.group([rbox(Hp, -8, -2.5, 8, 2.5, "dark", cut=1, shade=False)])
+    if p["eyes"] == "blink":
+        cv.group([pix([Hp(x, 0.5) for x in (-5, -4, -3, 3, 4, 5)], lamp(g))], inner=False)
+    else:
+        cv.group([ellipse(*Hp(-3.8, 0), 1.7, 1.7, lamp(g), shade=False),
+                  ellipse(*Hp(3.8, 0), 1.7, 1.7, lamp(g), shade=False)], inner=False)
+    if p["mouth"] == "open":
+        cv.group([rbox(Hp, -2, 4, 2, 6.2, "dark", cut=0.6, shade=False)], inner=False)
+    else:
+        cv.group([pix([Hp(x, 5) for x in (-2, -1, 0, 1)], "dark")], inner=False)
+
+
+def head_skull(cv, Hp, view, p, bot):
+    """Endo: a chrome endoskeleton skull with red eyes that flare on the beat."""
+    g = p["glow"]
+    ek = eye_key(g)
+    if view == "side":
+        cv.group([ellipse(*Hp(-0.5, -2), 8.8, 8, "metal"), rbox(Hp, 0, 1, 8, 8, "metal", cut=2)], cast=True)
+        cv.group([ellipse(*Hp(5, -0.5), 2.2, 1.8, "dark", shade=False)], inner=False)
+        cv.group([pix([Hp(5.5, -0.5)], ek), pix([Hp(x, 5.5) for x in (3, 5, 7)], "dark")], inner=False)
+        cv.group([chain([Hp(-3, 3), Hp(-4, 9)], 1.2, "metal2")])
+        return
+    cv.group([ellipse(*Hp(0, -2), 8.6, 8, "metal"), rbox(Hp, -6, 1, 6, 8.5, "metal", cut=2.5)], cast=True)
+    if view == "back":
+        cv.group([pix([Hp(x, -6 + abs(x) * 0.3) for x in range(-4, 5)], "metal2")], inner=False)
+        return
+    cv.group([ellipse(*Hp(-3.3, -0.5), 2.4, 1.9, "dark", shade=False),
+              ellipse(*Hp(3.3, -0.5), 2.4, 1.9, "dark", shade=False),
+              poly([Hp(-1, 2), Hp(1, 2), Hp(0, 3.6)], "dark", shade=False)], inner=False)
+    eyes = [(-4, -1), (-3, -1), (3, -1), (4, -1)] if g > 0.6 else [(-3, -1), (3, -1)]
+    if p["eyes"] != "blink":
+        cv.group([pix([Hp(x + 0.5, y + 0.5) for x, y in eyes], ek)], inner=False)
+    cv.group([pix([Hp(x, 6) for x in (-4, -2, 0, 2, 4)], "dark")], inner=False)
+
+
+def head_bullet(cv, Hp, view, p, bot):
+    """Jet: a rounded flight helmet with a visor that lights up, and a fin antenna."""
+    g = p["glow"]
+    fin = 3 + 4 * p["ext"]
+    if view == "side":
+        cv.group([poly([Hp(-4, -6), Hp(-1, -6.5), Hp(-5, -7 - fin)], "metal2")])
+        cv.group([ellipse(*Hp(-5, -7 - fin), 1.5, 1.5, lamp(g), shade=False)])
+        cv.group([ellipse(*Hp(0, 0), 8.6, 7.6, "metal")], cast=True)
+        cv.group([rbox(Hp, 2, -2.5, 9, 2.5, lamp(g), cut=1.2, shade=False)])
+        return
+    cv.group([poly([Hp(-1.5, -6.5), Hp(1.5, -6.5), Hp(0, -7.5 - fin)], "metal2")])
+    cv.group([ellipse(*Hp(0, -7.5 - fin), 1.5, 1.5, lamp(g), shade=False)])
+    cv.group([ellipse(*Hp(0, 0), 9, 7.6, "metal")], cast=True)
+    if view == "back":
+        cv.group([pix([Hp(x, 3) for x in (-4, -2, 0, 2, 4)], "metal2")], inner=False)
+        return
+    cv.group([rbox(Hp, -7.5, -2.6, 7.5, 2.6, lamp(g), cut=1.2, shade=False)])
+    cv.group([pix([Hp(-5, -1.5), Hp(-4, -1.5)], "glint")], inner=False)
+
+
+# ---- torsos: (canvas, body->screen, view, pose, bot)
+def torso_box(cv, W_, view, p, bot):
+    w = 6.5 if view == "side" else 9
+    cv.group([rbox(W_, -w + 2, -3, w - 2, 2, "metal2", cut=1)])
+    cv.group([rbox(W_, -w, -26, w, -2, "metal", cut=2.5)], cast=True)
+    if view == "front":
+        cv.group([rbox(W_, -4.5, -20, 4.5, -10, "dark", cut=1, shade=False)])
+        cv.group([pix([W_(-2.5, -16.5), W_(0, -16.5), W_(2.5, -16.5)], lamp(p["glow"])),
+                  pix([W_(x, -13) for x in (-3, -2, -1, 0)], "metal2")], inner=False)
+    elif view == "back":
+        cv.group([pix([W_(x, y) for x in (-5, -2, 1, 4) for y in (-20, -16, -12, -8)], "metal2")], inner=False)
+    else:
+        cv.group([rbox(W_, 4, -19, 6.5, -11, "dark", cut=0.8, shade=False)])
+
+
+def torso_small(cv, W_, view, p, bot):
+    w = 4.5 if view == "side" else 6
+    cv.group([rbox(W_, -w, -14, w, 0, "acc", cut=1.5)], cast=True)
+    if view == "front":
+        cv.group([rbox(W_, -3.5, -10, 3.5, -3, "acc_h", cut=0.8, shade=False)])
+    elif view == "side":
+        cv.group([rbox(W_, 1.5, -10, 4.5, -3, "acc_h", cut=0.8, shade=False)])
+
+
+def torso_barrel(cv, W_, view, p, bot):
+    side = view == "side"
+    lo, up = W_(0, -8), W_(0.5 if side else 0, -18)
+    cv.group([blob([(lo[0], lo[1], 7.5 if side else 9.5, 9, 0, 0), (up[0], up[1], 6.5 if side else 7.8, 7.5, 0, 0)], "metal")], cast=True)
+    if view == "front":
+        cv.group([poly([W_(-5.5, -15), W_(5.5, -15), W_(8, -1), W_(-8, -1)], "acc")])
+        cv.group([pix([W_(x, 0) for x in range(-7, 8, 2)], "acc2")], inner=False)  # frilly hem
+        cv.group([chain([W_(-6, -15), W_(-7, -23)], 0.7, "acc", shade=False),
+                  chain([W_(6, -15), W_(7, -23)], 0.7, "acc", shade=False)], inner=False)
+    elif view == "back":
+        cv.group([chain([W_(-8.5, -12), W_(8.5, -12)], 1.0, "acc", shade=False)])
+        c = W_(0, -12)
+        cv.group([poly([c, W_(-5, -15.5), W_(-5, -8.5)], "acc"), poly([c, W_(5, -15.5), W_(5, -8.5)], "acc")])
+    else:
+        cv.group([poly([W_(3, -15), W_(6, -15), W_(8, -1), W_(4, -1)], "acc")])
+
+
+def torso_capsule(cv, W_, view, p, bot):
+    side = view == "side"
+    lo, up = W_(0, -7), W_(0, -17)
+    cv.group([blob([(lo[0], lo[1], 6.5 if side else 8, 8, 0, 0), (up[0], up[1], 6.5 if side else 7.8, 8, 0, 0)], "metal")], cast=True)
+    cv.group([chain([W_(-7.5 if not side else -6, -11), W_(7.5 if not side else 6, -11)], 0.9, "acc", shade=False)])
+    if view == "front":
+        cv.group([ellipse(*W_(0, -17), 3.2, 3.2, "dark", shade=False)])
+        cv.group([ellipse(*W_(0, -17), 1.9, 1.9, lamp(p["glow"]), shade=False)], inner=False)
+    elif view == "back":
+        cv.group([rbox(W_, -5, -21, -1.5, -13, "metal2", cut=1), rbox(W_, 1.5, -21, 5, -13, "metal2", cut=1)])
+
+
+def torso_ribs(cv, W_, view, p, bot):
+    side = view == "side"
+    cv.group([rbox(W_, -6 if not side else -4, -3, 6 if not side else 4, 2, "metal", cut=1.5)])
+    cv.group([chain([W_(0, -1), W_(0, -26)], 1.6, "metal2")])
+    ribs = []
+    for y in (-23, -20, -17, -14):
+        if side:
+            ribs.append(chain([W_(-0.5, y), W_(4.5, y + 1.5), W_(5, y + 3.5)], 0.9, "metal"))
+        else:
+            ribs.append(chain([W_(-1, y), W_(-6.8, y + 1.5), W_(-5.8, y + 3.4)], 0.9, "metal"))
+            ribs.append(chain([W_(1, y), W_(6.8, y + 1.5), W_(5.8, y + 3.4)], 0.9, "metal"))
+    cv.group(ribs)
+    cv.group([chain([W_(-8 if not side else -3, -25), W_(8 if not side else 3, -25)], 1.4, "metal")])
+
+
+def draw_robot(p, bot, view):
+    side, back = view == "side", view == "back"
+    if back:
+        p = mirrored(p)
+    cv = Canvas()
+    fl = bot.get("float", 0)
+    py = max(p["py"], -5) if fl else p["py"]
+    lean = p["lean"] * 0.3 if side else p["lean"] * bot.get("stiff", 0.7)
+    pel = (CX + p["px"] * (0.4 if side else 1.0), GROUND - bot["hip"] - fl + py)
+
+    def W_(x, y):
+        rx, ry = rot(x, y, lean)
+        return pel[0] + rx, pel[1] + ry
+    sx, sy = bot["shoulder"]
+    a1, a2 = bot["arm"]
+    ar = bot["arm_r"]
+
+    def limb_group(prims, extra, is_far, cast=True):
+        if is_far:
+            cv.group([far(q) for q in prims])
+            cv.group([far(q) for q in extra])
+        else:
+            cv.group(prims, cast=cast)
+            cv.group(extra)
+
+    def legs(which):
+        l1, l2 = bot["leg"]
+        lr = bot["leg_r"]
+        for fx, lift, s, is_far in which:
+            if side:
+                hip = W_(s * 1.0, 0)
+                stride = s * (abs(fx) - 8) * 0.4 + s * 1.5
+                foot = (pel[0] + stride + lift * 0.5, GROUND - 2.4 - lift)
+                knee, foot = leg_points(hip, foot, +1, l1, l2)
+            else:
+                hip = W_(s * bot["hip_w"], 0)
+                foot = (CX + fx * bot.get("stance", 1.0), GROUND - 2.4 - lift)
+                knee, foot = leg_points(hip, foot, s, l1, l2)
+            fw = bot.get("foot_w", 4.5)
+            fx0 = foot[0] + (2 if side else s * 1.2)
+            shoe = rbox(lambda x, y: (x, y), fx0 - fw, foot[1] - 1.8, fx0 + fw, foot[1] + 2.2, "metal2", cut=1.2)
+            limb_group([chain([hip, knee, foot], lr, "metal")], [ellipse(knee[0], knee[1], lr + 0.4, lr + 0.4, "metal2"), shoe], is_far)
+
+    def wheel():
+        top, bot_w, bot_y = bot["skirt"]
+        cv.group([poly([W_(-top, -2), W_(top, -2), W_(bot_w, bot_y), W_(-bot_w, bot_y)], "metal2")])
+        c = W_(0, bot_y + 3)
+        cv.group([ellipse(c[0], c[1], 4.5, 4.5, "dark")])
+        cv.group([ellipse(c[0], c[1], 1.5, 1.5, "metal2", shade=False)], inner=False)
+
+    def jet():
+        y0 = bot["nozzle"]
+        cv.group([rbox(W_, -3.5, y0, 3.5, y0 + 4, "metal2", cut=1)])
+        L = 6 + 7 * p["glow"] + 2 * p["ext"]
+        cv.group([poly([W_(-3, y0 + 4), W_(3, y0 + 4), W_(0, y0 + 4 + L)], "flame", shade=False)], inner=False)
+        cv.group([poly([W_(-1.6, y0 + 4), W_(1.6, y0 + 4), W_(0, y0 + 4 + L * 0.6)], "flame2", shade=False)], inner=False)
+
+    def arms(which):
+        for ua, fa, s, is_far in which:
+            if side:
+                sh = W_(-1.5 if is_far else 1.5, sy)
+                elbow, hand = side_arm_points(sh, ua, fa, a1, a2)
+            else:
+                sh = W_(s * sx, sy)
+                elbow, hand = arm_points(sh, ua, fa, s, a1, a2)
+            limb_group([chain([sh, elbow, hand], ar, "metal"), ellipse(sh[0], sh[1], ar + 0.9, ar + 0.9, "metal2")],
+                       [ellipse(elbow[0], elbow[1], ar * 0.8, ar * 0.8, "metal2"),
+                        ellipse(hand[0], hand[1], ar + 0.9, ar + 0.9, bot.get("hand", "metal2"))], is_far, cast=not back)
+
+    L_ARM, R_ARM = (p["la"], p["lf"], -1), (p["ra"], p["rf"], 1)
+    if side:
+        arms([(*L_ARM, True)])
+    move = bot["move"]
+    if move == "legs":
+        if side:
+            legs([(p["lfx"], p["llift"], -1, True), (p["rfx"], p["rlift"], 1, False)])
+        else:
+            legs([(p["lfx"], p["llift"], -1, False), (p["rfx"], p["rlift"], 1, False)])
+    elif move == "wheel":
+        wheel()
+    else:
+        jet()
+    if back:
+        arms([(*L_ARM, False), (*R_ARM, False)])
+    bot["torso"](cv, W_, view, p, bot)
+    if side:
+        arms([(*R_ARM, False)])
+    elif not back:
+        arms([(*L_ARM, False), (*R_ARM, False)])
+
+    hang = lean * 0.6 + p["tilt"] * (0.5 if side else 0.8)
+    hc = W_(p["hx"] * 0.3 + (1 if side else 0), bot["neck"] + p["hy"])
+    if bot.get("neck_r"):
+        cv.group([chain([W_(0, sy - 1), hc], bot["neck_r"], "metal2")])
+    bot["head"](cv, head_frame(hc, hang), view, p, bot)
+    return cv.render(bot["pal"], CX + p["px"] * 0.6, shadow_k(p) * (0.55 if fl else 1.0))
 
 
 # ------------------------------------------------------------------ fur patterns
@@ -821,6 +1145,17 @@ CLIPS = {
         dict(px=3, py=1, lean=8, tilt=8, la=140, lf=195, ra=150, rf=140, lfx=-8, rfx=9, tail=18, mouth="open"),
         dict(px=0, py=3, lean=0, tilt=0, la=145, lf=158, ra=145, rf=158, lfx=-8, rfx=8, tail=0),
     ]},
+    "robot": {"name": "The robot", "kind": "move", "frames": 16, "fps": 12, "keys": [
+        # Each pose is doubled so it holds, then snaps to the next: staccato.
+        dict(px=-1, py=2, tilt=-8, la=90, lf=180, ra=12, rf=12, lfx=-9, rfx=9, tail=-12, eyes="open"),
+        dict(px=-1, py=2, tilt=-8, la=90, lf=180, ra=12, rf=12, lfx=-9, rfx=9, tail=-12, eyes="open"),
+        dict(px=1, py=2, tilt=8, la=12, lf=12, ra=90, rf=180, lfx=-9, rfx=9, tail=12, eyes="open"),
+        dict(px=1, py=2, tilt=8, la=12, lf=12, ra=90, rf=180, lfx=-9, rfx=9, tail=12, eyes="open"),
+        dict(px=0, py=0, hy=-1, la=90, lf=90, ra=90, rf=90, lfx=-9, rfx=9, tail=0, mouth="open"),
+        dict(px=0, py=0, hy=-1, la=90, lf=90, ra=90, rf=90, lfx=-9, rfx=9, tail=0, mouth="open"),
+        dict(px=0, py=4, la=45, lf=290, ra=45, rf=290, lfx=-10, rfx=10, tail=0),
+        dict(px=0, py=4, la=45, lf=290, ra=45, rf=290, lfx=-10, rfx=10, tail=0),
+    ]},
     # ---- reactions
     "cheer": {"name": "Cheer", "kind": "react", "frames": 8, "fps": 12, "keys": [
         dict(px=0, py=-1, la=140, lf=150, ra=140, rf=150, lfx=-9, rfx=9, tail=-10, mouth="open"),
@@ -896,6 +1231,23 @@ def clip_poses(clip):
     poses = interp(clip["keys"], clip["frames"])
     if "blink" in clip:
         poses[clip["blink"]]["eyes"] = "blink"
+    # Specials ride the beat: each avatar type shows them its own way (cats
+    # swing their tails, robots pulse their lights and pump their antennas).
+    n = len(poses)
+    for i, p in enumerate(poses):
+        ph = i / n
+        if clip["kind"] == "move":      # a beat every 4 frames, two tail swings a loop
+            p["swing"] = 30 * math.sin(2 * math.pi * 2 * ph)
+            p["glow"] = max(0.0, 1 - (i % 4) / 2.5)
+            p["ext"] = 0.5 - 0.5 * math.cos(2 * math.pi * 2 * ph)
+        elif clip["kind"] == "react":   # all lights on, antennas up, tail going wild
+            p["swing"] = 36 * math.sin(2 * math.pi * 2 * ph)
+            p["glow"] = 1.0 if i % 2 == 0 else 0.7
+            p["ext"] = 1.0
+        else:                           # resting: a lazy tail, lights low
+            p["swing"] = 8 * math.sin(2 * math.pi * ph)
+            p["glow"] = 0.15
+            p["ext"] = 0.0
     return poses
 
 
@@ -903,7 +1255,7 @@ def clip_poses(clip):
 # Every clip can ease out to a shared "ready" stance and back in from it, so the
 # director can change moves (and turn around) without snapping: the last loop
 # ends on frame 0, OUT eases to the stance, IN eases from it into the next clip.
-HUB = dict(py=2, la=18, lf=8, ra=18, rf=8, lfx=-9, rfx=9, tail=0)
+HUB = dict(py=2, la=18, lf=8, ra=18, rf=8, lfx=-9, rfx=9, tail=0, swing=0, glow=0.2, ext=0)
 TWEEN_OUT = (1 / 3, 2 / 3)       # fractions of the way from the clip's frame 0 to the stance
 TWEEN_IN = (0.0, 1 / 3, 2 / 3)   # fractions of the way from the stance to the clip's frame 0
 TWEEN_FPS = 12
@@ -1043,6 +1395,62 @@ CATS = [
 ]
 
 
+def robot_pal(ol, flats, **groups):
+    return dict(palette(ol, "#000000", **groups), **{k: hexc(v) for k, v in flats.items()})
+
+
+ROBOTS = [
+    {
+        "id": "boxy", "name": "Boxy", "blurb": "CRT-headed bot with red eyes and twin antennas", "signature": "robot",
+        "bot": dict(move="legs", hip=21.5, hip_w=4.5, leg=(10.5, 10.5), leg_r=2.8, foot_w=4.5,
+                    shoulder=(10.5, -23), arm=(8.5, 8), arm_r=2.3, neck=-32, neck_r=2.0,
+                    head=head_crt, torso=torso_box,
+                    pal=robot_pal("#1c1b19", dict(eye="#d8432c", eye_on="#ff7650", lamp_off="#55534d",
+                                                  lamp_dim="#c99a35", lamp_on="#ffe066", glint="#ffffff"),
+                                  metal=("#c9c7b9", "#e4e2d6", "#9b998d"), metal2=("#7e7c73", "#96948b", "#5e5c55"),
+                                  dark=("#26262c", "#34343c", "#1a1a1f"))),
+    },
+    {
+        "id": "pixel", "name": "Pixel", "blurb": "Little TV-head with a smiley on the screen", "signature": "kneeup",
+        "bot": dict(move="legs", hip=12, hip_w=3, leg=(6, 6), leg_r=2.4, foot_w=3, stance=0.55,
+                    shoulder=(6.5, -11), arm=(5, 4.5), arm_r=1.8, neck=-24,
+                    head=head_tv, torso=torso_small,
+                    pal=robot_pal("#1a160f", dict(screen="#2f6b5e", face="#e9dc77", face_on="#fff7a8",
+                                                  lamp_off="#5c5340", lamp_dim="#e0c45a", lamp_on="#fff3a0"),
+                                  acc=("#bca57c", "#d6c196", "#97815b"), metal=("#9d8762", "#b49e78", "#7a6646"),
+                                  metal2=("#6f5e42", "#83704f", "#54462f"), dark=("#3b3527", "#4a4332", "#2b261c"))),
+    },
+    {
+        "id": "tidy", "name": "Tidy", "blurb": "Retro maid bot on a wheel, with bulb antennas", "signature": "twist",
+        "bot": dict(move="wheel", hip=21, skirt=(8, 6, 12), shoulder=(8.5, -21), arm=(8.5, 7.5), arm_r=2.1,
+                    neck=-31, neck_r=1.8, head=head_dome, torso=torso_barrel,
+                    pal=robot_pal("#13201f", dict(lamp_off="#6b3b3f", lamp_dim="#c8484f", lamp_on="#ff6f6f"),
+                                  metal=("#5fb3b5", "#84cfcf", "#3f8a8e"), metal2=("#3c6b73", "#4d808a", "#2c5158"),
+                                  dark=("#1d2b33", "#283942", "#141e24"), acc=("#f6f5f1", "#ffffff", "#d6d4cc"),
+                                  acc2=("#cfcdd6", "#e2e0e8", "#aeacb6"))),
+    },
+    {
+        "id": "jet", "name": "Jet", "blurb": "Hovers on a thruster that flares on the beat", "signature": "wave",
+        "bot": dict(move="jet", float=7, hip=18, nozzle=0, shoulder=(8.5, -20), arm=(8.5, 8), arm_r=2.2,
+                    neck=-30, head=head_bullet, torso=torso_capsule,
+                    pal=robot_pal("#151924", dict(lamp_off="#264653", lamp_dim="#3fa7c4", lamp_on="#8ff3ff",
+                                                  flame="#ff8f2e", flame2="#fff1a6", glint="#ffffff"),
+                                  metal=("#dfe3ea", "#f5f7fa", "#a9b0bd"), metal2=("#6c7586", "#828c9e", "#515969"),
+                                  dark=("#1c2130", "#262c3e", "#141824"), acc=("#e2483d", "#f26a5f", "#b23229"))),
+    },
+    {
+        "id": "endo", "name": "Endo", "blurb": "Chrome endoskeleton whose red eyes flare", "signature": "robot",
+        "bot": dict(move="legs", hip=21.5, hip_w=3.5, leg=(11, 11), leg_r=1.6, foot_w=4, shoulder=(8.5, -24),
+                    arm=(9.5, 8.5), arm_r=1.4, neck=-33, neck_r=1.3, stiff=0.5, head=head_skull, torso=torso_ribs,
+                    pal=robot_pal("#0b0b0e", dict(eye="#c81e28", eye_on="#ff4a4a", lamp_off="#4a1a1d",
+                                                  lamp_dim="#c81e28", lamp_on="#ff4a4a", glint="#ffffff"),
+                                  metal=("#b7bec7", "#e8edf2", "#7c848f"), metal2=("#59606a", "#6f7782", "#40464e"),
+                                  dark=("#121216", "#1c1c22", "#0b0b0e"))),
+    },
+]
+CATS += ROBOTS
+
+
 # ------------------------------------------------------------------ export
 def upscale(img, k):
     return img.resize((img.width * k, img.height * k), Image.NEAREST)
@@ -1123,6 +1531,7 @@ def main(only=None):
         save_indexed(sheet, os.path.join(sprites, f"{cat['id']}.png"))
         sig = cat["signature"]
         manifest["cats"].append({"id": cat["id"], "name": cat["name"], "blurb": cat["blurb"],
+                                 "kind": "robot" if cat.get("bot") else "cat",
                                  "signature": sig, "dance": CLIPS[sig]["name"]})
 
         # ---- previews: every clip side by side (front), and a turnaround

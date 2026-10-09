@@ -169,10 +169,12 @@ input:focus { border-color: var(--focus); outline: none; }
   background:
     linear-gradient(to bottom, var(--wall) 0, var(--wall) 62%, #3a2a3d 62%, var(--floor) 100%);
 }
-.screen-wrap { padding: 1.2rem 16px 0; display: flex; justify-content: center; }
+/* The video spans the stage (as wide as the window's height allows); the DJ
+   booth overlaps its lower edge so the DJs stand in front of it. */
+.screen-wrap { padding: 0.8rem 16px 0; display: flex; justify-content: center; }
 .screen {
   position: relative;
-  width: min(720px, 100%, calc((100vh - 660px) * 1.78));
+  width: min(100%, calc((100vh - 330px) * 1.78));
   min-width: min(360px, 100%);
   aspect-ratio: 16 / 9;
   background: #000;
@@ -194,7 +196,18 @@ input:focus { border-color: var(--focus); outline: none; }
 .screen-empty p { margin: 0.2rem; }
 .screen-empty p:first-child { font-size: 1.5rem; }
 
-.booth-area { position: relative; margin: 1rem auto 0; width: min(760px, 100%); padding: 0 16px; }
+.booth-area {
+  --dj-s: 1.75; /* DJ cat scale, set by app.js from the seat width */
+  position: relative;
+  z-index: 2;
+  width: min(100%, calc((100vh - 330px) * 1.78 + 32px)); /* matches the screen */
+  min-width: min(392px, 100%);
+  margin: calc(-88px * var(--dj-s) - 40px) auto 0; /* booth sits on the video's bottom edge */
+  padding: 0 16px;
+  pointer-events: none; /* clicks fall through to the video guard, except on seats */
+}
+.booth-area .seat-open, .booth-area .booth { pointer-events: auto; }
+.seats .cat { --s: var(--dj-s) !important; }
 .spotlight {
   position: absolute;
   bottom: 40px;
@@ -208,7 +221,7 @@ input:focus { border-color: var(--focus); outline: none; }
   transition: left 0.5s ease, opacity 0.4s;
 }
 .spotlight.on { opacity: 1; }
-.seats { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); align-items: end; height: 190px; }
+.seats { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); align-items: end; height: calc(88px * var(--dj-s) + 28px); }
 .seat { position: relative; display: grid; justify-items: center; align-content: end; }
 .seat .nametag { position: absolute; top: -4px; }
 .seat-open {
@@ -218,7 +231,7 @@ input:focus { border-color: var(--focus); outline: none; }
   color: var(--muted);
   border: 2px dashed var(--line);
   border-radius: 6px;
-  background: transparent;
+  background: rgba(18, 14, 29, 0.72); /* readable over the video */
   padding: 0.4rem 0.5rem;
   cursor: pointer;
 }
@@ -253,9 +266,9 @@ input:focus { border-color: var(--focus); outline: none; }
   position: relative;
   z-index: 3;
   flex: 1 0 auto;
-  min-height: calc(230px * var(--k));
-  margin-top: calc(-70px * var(--k));
-  clip-path: inset(-800px 0 0 0); /* crop only the bottom edge */
+  min-height: calc(160px * var(--k));
+  margin-top: calc(-80px * var(--k));
+  overflow: clip; /* the front row is cut off at the floor's edge without adding scroll */
   pointer-events: none;           /* never block the seats behind it */
 }
 .fan { position: absolute; display: grid; justify-items: center; transform: translateX(-50%); }
@@ -452,9 +465,10 @@ input:focus { border-color: var(--focus); outline: none; }
   .cat-grid { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 560px) {
-  .seats { height: 130px; }
-  .seats .cat { --s: 1 !important; }
-  .seat-open { font-size: 0.75rem; margin-bottom: 44px; }
+  .seat-open { font-size: 0.75rem; margin-bottom: 26px; padding: 0.3rem 0.4rem; }
+  /* Small video: only the DJs' upper bodies overlap it, and the booth is slimmer. */
+  .booth-area { margin-top: calc(-88px * var(--dj-s) * 0.7); }
+  .booth { height: 38px; margin-top: -18px; }
   .platter { width: 20px; height: 20px; }
   .deck { gap: 4px; }
 }

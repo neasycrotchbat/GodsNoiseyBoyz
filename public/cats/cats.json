@@ -2,12 +2,12 @@
   "frameWidth": 64,
   "frameHeight": 88,
   "cols": 32,
-  "rows": 24,
+  "rows": 27,
   "tweenFps": 12,
   "views": {
     "front": 0,
-    "side": 8,
-    "back": 16
+    "side": 9,
+    "back": 18
   },
   "clips": {
     "swing": {
@@ -17,11 +17,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 184,
+        "start": 200,
         "count": 2
       },
       "in": {
-        "start": 186,
+        "start": 202,
         "count": 3
       }
     },
@@ -32,11 +32,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 189,
+        "start": 205,
         "count": 2
       },
       "in": {
-        "start": 191,
+        "start": 207,
         "count": 3
       }
     },
@@ -47,11 +47,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 194,
+        "start": 210,
         "count": 2
       },
       "in": {
-        "start": 196,
+        "start": 212,
         "count": 3
       }
     },
@@ -62,11 +62,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 199,
+        "start": 215,
         "count": 2
       },
       "in": {
-        "start": 201,
+        "start": 217,
         "count": 3
       }
     },
@@ -77,11 +77,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 204,
+        "start": 220,
         "count": 2
       },
       "in": {
-        "start": 206,
+        "start": 222,
         "count": 3
       }
     },
@@ -92,11 +92,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 209,
+        "start": 225,
         "count": 2
       },
       "in": {
-        "start": 211,
+        "start": 227,
         "count": 3
       }
     },
@@ -107,11 +107,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 214,
+        "start": 230,
         "count": 2
       },
       "in": {
-        "start": 216,
+        "start": 232,
         "count": 3
       }
     },
@@ -122,11 +122,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 219,
+        "start": 235,
         "count": 2
       },
       "in": {
-        "start": 221,
+        "start": 237,
         "count": 3
       }
     },
@@ -137,86 +137,101 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 224,
+        "start": 240,
         "count": 2
       },
       "in": {
-        "start": 226,
+        "start": 242,
+        "count": 3
+      }
+    },
+    "robot": {
+      "name": "The robot",
+      "kind": "move",
+      "start": 144,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 245,
+        "count": 2
+      },
+      "in": {
+        "start": 247,
         "count": 3
       }
     },
     "cheer": {
       "name": "Cheer",
       "kind": "react",
-      "start": 144,
+      "start": 160,
       "count": 8,
       "fps": 12,
       "out": {
-        "start": 229,
+        "start": 250,
         "count": 2
       },
       "in": {
-        "start": 231,
+        "start": 252,
         "count": 3
       }
     },
     "jump": {
       "name": "Jump",
       "kind": "react",
-      "start": 152,
+      "start": 168,
       "count": 8,
       "fps": 12,
       "out": {
-        "start": 234,
+        "start": 255,
         "count": 2
       },
       "in": {
-        "start": 236,
+        "start": 257,
         "count": 3
       }
     },
     "clap": {
       "name": "Clap",
       "kind": "react",
-      "start": 160,
+      "start": 176,
       "count": 8,
       "fps": 10,
       "out": {
-        "start": 239,
+        "start": 260,
         "count": 2
       },
       "in": {
-        "start": 241,
+        "start": 262,
         "count": 3
       }
     },
     "bob": {
       "name": "Head bob",
       "kind": "rest",
-      "start": 168,
+      "start": 184,
       "count": 8,
       "fps": 8,
       "out": {
-        "start": 244,
+        "start": 265,
         "count": 2
       },
       "in": {
-        "start": 246,
+        "start": 267,
         "count": 3
       }
     },
     "idle": {
       "name": "Idle",
       "kind": "rest",
-      "start": 176,
+      "start": 192,
       "count": 8,
       "fps": 5,
       "out": {
-        "start": 249,
+        "start": 270,
         "count": 2
       },
       "in": {
-        "start": 251,
+        "start": 272,
         "count": 3
       }
     }
@@ -226,6 +241,7 @@
       "id": "biscuit",
       "name": "Biscuit",
       "blurb": "Classic cream with a red collar and bell",
+      "kind": "cat",
       "signature": "swing",
       "dance": "Swing step"
     },
@@ -233,6 +249,7 @@
       "id": "smokey",
       "name": "Smokey",
       "blurb": "Gray tabby in red headphones",
+      "kind": "cat",
       "signature": "shuffle",
       "dance": "Side shuffle"
     },
@@ -240,6 +257,7 @@
       "id": "midnight",
       "name": "Midnight",
       "blurb": "Tuxedo cat in shades and a gold chain",
+      "kind": "cat",
       "signature": "kneeup",
       "dance": "Knee-up groove"
     },
@@ -247,6 +265,7 @@
       "id": "pepper",
       "name": "Pepper",
       "blurb": "Calico with a pink bow",
+      "kind": "cat",
       "signature": "elbows",
       "dance": "Elbow bounce"
     },
@@ -254,6 +273,7 @@
       "id": "mochi",
       "name": "Mochi",
       "blurb": "Siamese in a blue polka-dot bandana",
+      "kind": "cat",
       "signature": "stomp",
       "dance": "Party stomp"
     },
@@ -261,6 +281,7 @@
       "id": "ginger",
       "name": "Ginger",
       "blurb": "Orange tabby in a cozy striped scarf",
+      "kind": "cat",
       "signature": "twist",
       "dance": "The twist"
     },
@@ -268,6 +289,7 @@
       "id": "snowball",
       "name": "Snowball",
       "blurb": "Fluffy white cat with a daisy behind the ear",
+      "kind": "cat",
       "signature": "wave",
       "dance": "Hands in the air"
     },
@@ -275,6 +297,7 @@
       "id": "ash",
       "name": "Ash",
       "blurb": "Blue-gray gentleman in a red bow tie",
+      "kind": "cat",
       "signature": "disco",
       "dance": "Disco point"
     },
@@ -282,6 +305,7 @@
       "id": "tortie",
       "name": "Tortie",
       "blurb": "Tortoiseshell in a mustard beanie",
+      "kind": "cat",
       "signature": "roof",
       "dance": "Raise the roof"
     },
@@ -289,6 +313,7 @@
       "id": "bengal",
       "name": "Bengal",
       "blurb": "Spotted wild one in a party hat",
+      "kind": "cat",
       "signature": "stomp",
       "dance": "Party stomp"
     },
@@ -296,8 +321,49 @@
       "id": "cocoa",
       "name": "Cocoa",
       "blurb": "Chocolate cat in cool shades",
+      "kind": "cat",
       "signature": "elbows",
       "dance": "Elbow bounce"
+    },
+    {
+      "id": "boxy",
+      "name": "Boxy",
+      "blurb": "CRT-headed bot with red eyes and twin antennas",
+      "kind": "robot",
+      "signature": "robot",
+      "dance": "The robot"
+    },
+    {
+      "id": "pixel",
+      "name": "Pixel",
+      "blurb": "Little TV-head with a smiley on the screen",
+      "kind": "robot",
+      "signature": "kneeup",
+      "dance": "Knee-up groove"
+    },
+    {
+      "id": "tidy",
+      "name": "Tidy",
+      "blurb": "Retro maid bot on a wheel, with bulb antennas",
+      "kind": "robot",
+      "signature": "twist",
+      "dance": "The twist"
+    },
+    {
+      "id": "jet",
+      "name": "Jet",
+      "blurb": "Hovers on a thruster that flares on the beat",
+      "kind": "robot",
+      "signature": "wave",
+      "dance": "Hands in the air"
+    },
+    {
+      "id": "endo",
+      "name": "Endo",
+      "blurb": "Chrome endoskeleton whose red eyes flare",
+      "kind": "robot",
+      "signature": "robot",
+      "dance": "The robot"
     }
   ]
 }

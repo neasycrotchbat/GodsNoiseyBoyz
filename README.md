@@ -71,11 +71,18 @@ Press `Win + R`, type `shell:startup`, and press Enter. Right-click in that fold
 
 ## Changing the cats
 
-Each cat is a sprite atlas in `public/cats/`: 64×88 frames, 32 to a row, with one block of rows per view (front, side, back). Every cat has the same clips: nine dance moves (Swing step, Side shuffle, Knee-up groove, Elbow bounce, Party stomp, The twist, Disco point, Raise the roof, Hands in the air), reactions (cheer, jump, clap) and resting loops (head bob, idle). `public/cats/cats.json` lists where each clip starts and how fast it plays.
+Each cat is a sprite atlas in `public/cats/`: 64×88 frames, 32 to a row, with one block of rows per view (front, side, back). Every avatar has the same clips: ten dance moves (Swing step, Side shuffle, Knee-up groove, Elbow bounce, Party stomp, The twist, Disco point, Raise the roof, Hands in the air, The robot), reactions (cheer, jump, clap) and resting loops (head bob, idle). `public/cats/cats.json` lists where each clip starts and how fast it plays.
 
 `public/dance.js` is the dance director. While a song plays, the DJ and anyone who voted Awesome string moves together, switching every few seconds, turning to the side or back, and sometimes spinning. Everyone else bobs along, and between songs they idle and look around. The whole room jumps and cheers when a new song starts and claps when the music stops. The choices come from the song's start time and each person's ID, so every friend sees the same dancing. Each cat favours its signature move. Changing moves is tweened: every clip has a few eased frames out to a shared "ready" stance and back in, so a cat settles out of one move, turns there if it's changing direction, and eases into the next.
 
-There are eleven cats to pick from: Biscuit, Smokey, Midnight, Pepper, Mochi, Ginger (tabby in a scarf), Snowball (white, with a daisy), Ash (blue-gray in a bow tie), Tortie (tortoiseshell in a beanie), Bengal (spotted, in a party hat) and Cocoa (chocolate in shades).
+There are sixteen avatars to pick from.
+
+- **Eleven cats:** Biscuit, Smokey, Midnight, Pepper, Mochi, Ginger (tabby in a scarf), Snowball (white, with a daisy), Ash (blue-gray in a bow tie), Tortie (tortoiseshell in a beanie), Bengal (spotted, in a party hat) and Cocoa (chocolate in shades). Their special: tails swing with the beat.
+- **Five robots:** Boxy (CRT head, twin antennas), Pixel (TV head with a smiley screen), Tidy (a retro maid bot on a wheel), Jet (hovers on a thruster) and Endo (a chrome endoskeleton). Their special: lights pulse on the beat (antenna tips, eyes, visors, Jet's thruster flame) and antennas pump up and down. Robots favour a staccato move of their own, The robot.
+
+Robots are drawn on the same skeleton as the cats (`draw_robot` in `make_cats.py`, built from a head, a torso and legs, a wheel or a thruster), so every move works for them too.
+
+**The stage:** the video fills the width of the stage, with the DJ booth standing in front of its lower edge, so the DJs dance in front of the big screen.
 
 **The crowd:** the dance floor is a concert crowd seen from behind, facing the DJ booth: three rows of big cats, the back rows' heads over the decks and the front row cut off at the waist. They turn around to face you now and then mid-dance. Real people stand in the front row with their names over their heads (yours in amber); NPC cats fill in around and behind them, dimmer the further back they are. Everyone sees the same crowd. They bob along during songs and cheer when a new one starts; the more Awesome votes a song gets, the more of them dance, and Lame votes calm them down. The whole scene scales to the width of the screen.
 
