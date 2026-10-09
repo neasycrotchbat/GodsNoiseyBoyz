@@ -46,7 +46,7 @@
     return n;
   }
   function setCat(n, catId, { mode = 'still', seed, anchor = 0, face } = {}) {
-    n.style.backgroundImage = `url(cats/${catId}.png?v=${SPRITE_VERSION})`;
+    lazySkin(n, catId);
     n.setAttribute('role', 'img');
     const cat = CATS.find((c) => c.id === catId);
     n.setAttribute('aria-label', cat ? cat.name : 'cat');
@@ -54,13 +54,53 @@
   }
   const SPRITE_VERSION = 6;
 
+  // Sprite sheets are big (~240KB each), so a skin downloads only once
+  // something wearing it comes on screen. After that it's cached, and new
+  // nodes in that skin (the stage re-renders often) show it immediately.
+  const shownSkins = new Set();
+  const skinUrl = (id) => `url(cats/${id}.png?v=${SPRITE_VERSION})`;
+  const skinWatcher = 'IntersectionObserver' in window
+    ? new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const n = e.target;
+        shownSkins.add(n.dataset.cat);
+        n.style.backgroundImage = skinUrl(n.dataset.cat);
+        skinWatcher.unobserve(n);
+      }
+    }, { rootMargin: '150px' })
+    : null;
+  function lazySkin(n, id) {
+    if (skinWatcher) skinWatcher.unobserve(n);
+    if (!skinWatcher || shownSkins.has(id)) {
+      n.style.backgroundImage = skinUrl(id);
+      return;
+    }
+    n.style.backgroundImage = '';
+    skinWatcher.observe(n);
+  }
+
   // The NPC crowd is the same for everyone: skins and spots come from fixed seeds.
   let npcs = [];
+  // NPCs share a small wardrobe (4 cats + 2 robots, so only 6 sprite sheets
+  // to download) and get variety from a colour tint each instead.
+  const NPC_TINTS = [0, 0, 28, -28, 55, -55, 90, -90];
   function makeNpcs(count) {
+    const pick = Dance.seedRand('npc-wardrobe');
+    const shuffled = (list) => list.map((c) => [pick(), c]).sort((a, b) => a[0] - b[0]).map(([, c]) => c.id);
+    const wardrobe = [
+      ...shuffled(CATS.filter((c) => c.kind !== 'robot')).slice(0, 4),
+      ...shuffled(CATS.filter((c) => c.kind === 'robot')).slice(0, 2),
+    ];
     return Array.from({ length: count }, (_, i) => {
       const rand = Dance.seedRand('npc:' + i);
-      // Rows: 0 = back, 1 = middle, 2 = front (beside the real people).
-      return { id: 'npc:' + i, skin: CATS[Math.floor(rand() * CATS.length)].id, row: i % 3, jitter: (rand() - 0.5) * 3 };
+      return {
+        id: 'npc:' + i,
+        skin: wardrobe[Math.floor(rand() * wardrobe.length)],
+        tint: NPC_TINTS[Math.floor(rand() * NPC_TINTS.length)],
+        row: i % 3, // 0 = back, 1 = middle, 2 = front (beside the real people)
+        jitter: (rand() - 0.5) * 3,
+      };
     });
   }
 
@@ -350,6 +390,7 @@
         fan.style.setProperty('--row-s', CROWD_ROWS[row].s);
         if (m.npc) {
           fan.setAttribute('aria-hidden', 'true');
+          fan.style.setProperty('--tint', m.npc.tint + 'deg');
           const keen = c ? Dance.seedRand(m.id + c.startedAt)() : 1;
           const mode = !c ? 'chill' : keen < hype ? 'dance' : 'groove';
           fan.append(catNode(m.npc.skin, { mode, seed: m.id, anchor, face: 'stage' }));

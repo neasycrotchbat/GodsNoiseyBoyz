@@ -273,9 +273,11 @@ input:focus { border-color: var(--focus); outline: none; }
 }
 .fan { position: absolute; display: grid; justify-items: center; transform: translateX(-50%); }
 .crowd .cat { --s: calc(var(--row-s, 2) * var(--k)) !important; }
-.crowd-row0 .cat { filter: brightness(0.55) saturate(0.75); }
-.crowd-row1 .cat { filter: brightness(0.75) saturate(0.88); }
-.crowd-row2.npc .cat { filter: brightness(0.92); }
+/* NPCs get a hue tint (--tint) for variety; real people keep their true colours. */
+.crowd-row0 .cat { filter: hue-rotate(var(--tint, 0deg)) brightness(0.55) saturate(0.75); }
+.crowd-row1 .cat { filter: hue-rotate(var(--tint, 0deg)) brightness(0.75) saturate(0.88); }
+.crowd-row2.npc .cat { filter: hue-rotate(var(--tint, 0deg)) brightness(0.92); }
+.crowd-row0:not(.npc) .cat, .crowd-row1:not(.npc) .cat { --tint: 0deg; }
 .crowd .nametag { margin-bottom: calc(-10px * var(--k)); position: relative; z-index: 1; max-width: 96px; font-size: 0.75rem; }
 .crowd .fan.lift .nametag { margin-bottom: calc(14px * var(--k)); } /* neighbours' names sit at different heights */
 .crowd .nametag.me { color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
