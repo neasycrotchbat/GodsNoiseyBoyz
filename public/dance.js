@@ -8,8 +8,9 @@
  *
  * When the song's tempo is known (looked up, or tapped by someone in the room)
  * everything locks to the beat: each move loop is one bar, moves change on
- * 2- and 4-bar phrases, the whole crowd hits the same move every 8th bar, and
- * a wave ripples across the floor every 16 bars. Without a tempo the same
+ * 2- and 4-bar phrases, the last two bars of every 16 are a crowd-wide drop
+ * (everyone easing into the same move, a little out of step), and a wave
+ * ripples across the floor every 32 bars. Without a tempo the same
  * choreography runs on its own clock.
  *
  * An avatar element opts in with data attributes (set by Dance.attach):
@@ -103,16 +104,20 @@
     }
     if (mode === 'groove') {
       if (r < 0.15) return { clip: 'clap', view: 'front', flip: false, spin: false, n: halfBars(1), kind: 'interlude' };
-      const side = rand() < 0.2;
-      return { clip: 'bob', view: side ? 'side' : 'front', flip: rand() < 0.5, spin: false, n: halfBars(2 + Math.floor(rand() * 3)), kind: 'rest' };
+      // Mostly facing out, sometimes side-on, now and then turned all the way
+      // around (for the crowd: facing you), and the odd spin.
+      const f = rand();
+      const view = f < 0.68 ? 'front' : f < 0.84 ? 'side' : f < 0.95 ? 'back' : 'front';
+      return { clip: 'bob', view, flip: rand() < 0.5, spin: f >= 0.95, n: halfBars(2 + Math.floor(rand() * 3)), kind: 'rest' };
     }
     if (mode === 'sulk') { // booed: arms down, back to the stage
       return { clip: 'idle', view: 'back', flip: false, spin: false, n: 4, kind: 'rest' };
     }
     // chill: mostly idle facing out, now and then looking around or bobbing along
     if (r < 0.12) return { clip: 'bob', view: 'front', flip: false, spin: false, n: 2, kind: 'rest' };
-    const look = rand() < 0.18;
-    return { clip: 'idle', view: look ? 'side' : 'front', flip: rand() < 0.5, spin: false, n: look ? 1 : 2 + Math.floor(rand() * 3), kind: 'rest' };
+    const f = rand();
+    const view = f < 0.74 ? 'front' : f < 0.92 ? 'side' : 'back'; // look around, sometimes all the way
+    return { clip: 'idle', view, flip: rand() < 0.5, spin: false, n: view !== 'front' ? 1 : 2 + Math.floor(rand() * 3), kind: 'rest' };
   }
 
   const WINDOW = 10 * 60e3; // sequences with no song to anchor them restart every 10 minutes
@@ -214,24 +219,38 @@
     const { tl, seg, dt, t } = timelineAt(mode, seed, skin, anchor, T, now);
     const songOn = anchor && (mode === 'dance' || mode === 'groove');
 
-    // Crowd-wide moments while a song plays: everyone hits the same move on
-    // every 8th bar, and a wave ripples across the floor every 16 bars.
+    // Crowd-wide moments while a song plays: the last two bars of every 16 are
+    // a drop where the whole crowd falls into the same move, and a wave
+    // ripples across the floor every 32 bars.
     if (songOn) {
-      const bar = T ? T.bar : 1600;
+      const bar = T ? T.bar : 2000;
+      const beat = bar / 4;
       const base = T ? T.base : anchor;
       const k = Math.floor((now - base) / bar);
       const into = now - base - k * bar;
       const x = n.dataset.x;
-      if (x !== undefined && mod(k, 16) === 3) {
+      if (x !== undefined && mod(k, 32) === 3) {
         const at = +x * bar * 0.75;
-        if (into >= at && into < at + bar / 4) {
-          const c = M.clips.jump;
-          return show(n, 'jump', Math.floor(((into - at) / (bar / 4)) * c.count), 'front', false);
+        if (into >= at && into < at + beat) {
+          return show(n, 'jump', Math.floor(((into - at) / beat) * M.clips.jump.count), 'front', false);
         }
       }
-      if (k > 0 && mod(k, 8) === 7 && MOVES.length) {
-        const drop = MOVES[hashStr(`drop|${base}|${k}`) % MOVES.length];
-        return show(n, drop, Math.floor((into / bar) * M.clips[drop].count), 'front', false);
+      const cycle = 16;
+      const dropStart = k - mod(k, cycle) + cycle - 2; // first bar of this cycle's drop
+      if (k >= cycle - 2 && MOVES.length && (k === dropStart || k === dropStart + 1)) {
+        const t0 = base + dropStart * bar;
+        const drop = MOVES[hashStr(`drop|${base}|${dropStart}`) % MOVES.length];
+        // Not everyone at once: each avatar joins up to a beat late and some
+        // drift back to their own moves up to two beats early, easing in and out.
+        const join = t0 + (hashStr(seed + '|join') % 1000) / 1000 * beat;
+        const leave = t0 + 2 * bar - (hashStr(seed + '|leave') % 1000) / 1000 * beat * 2;
+        const c = M.clips[drop];
+        const ease = beat * 0.75;
+        if (now >= join && now < leave) {
+          if (c.in && now < join + ease) return showIdx(n, c.in.start + Math.floor(((now - join) / ease) * c.in.count), 'front', false);
+          if (c.out && now >= leave - ease) return showIdx(n, c.out.start + Math.min(c.out.count - 1, Math.floor(((now - (leave - ease)) / ease) * c.out.count)), 'front', false);
+          return show(n, drop, Math.floor((mod(now - base, bar) / bar) * c.count), 'front', false);
+        }
       }
     }
 

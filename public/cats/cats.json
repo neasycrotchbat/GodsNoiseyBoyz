@@ -424,6 +424,86 @@
       "kind": "robot",
       "signature": "robot",
       "dance": "The robot"
+    },
+    {
+      "id": "ironclad",
+      "name": "Ironclad",
+      "blurb": "Gold-armoured soldier with a red-eyed helm and a huge sword",
+      "kind": "spire",
+      "signature": "stomp",
+      "dance": "Party stomp"
+    },
+    {
+      "id": "silent",
+      "name": "Silent",
+      "blurb": "Hooded huntress in an antlered skull mask, with twin glowing daggers",
+      "kind": "spire",
+      "signature": "shuffle",
+      "dance": "Side shuffle"
+    },
+    {
+      "id": "regent",
+      "name": "Regent",
+      "blurb": "Star-crowned heir riding a stone throne on tentacles",
+      "kind": "spire",
+      "signature": "disco",
+      "dance": "Disco point"
+    },
+    {
+      "id": "necrobinder",
+      "name": "Necrobinder",
+      "blurb": "Floating lich with blue flame hair, a scythe and Osty the hand",
+      "kind": "spire",
+      "signature": "wave",
+      "dance": "Hands in the air"
+    },
+    {
+      "id": "defect",
+      "name": "Defect",
+      "blurb": "Gold automaton with a teal cloak and one big blue orb",
+      "kind": "spire",
+      "signature": "robot",
+      "dance": "The robot"
+    },
+    {
+      "id": "byrdonis",
+      "name": "Byrdonis",
+      "blurb": "Lanky green bird with a hooked beak and a swinging tail",
+      "kind": "spire",
+      "signature": "kneeup",
+      "dance": "Knee-up groove"
+    },
+    {
+      "id": "colony",
+      "name": "Skulking Colony",
+      "blurb": "A walking reef of coral and glowing barnacles",
+      "kind": "spire",
+      "signature": "elbows",
+      "dance": "Elbow bounce"
+    },
+    {
+      "id": "cultist",
+      "name": "Cultist",
+      "blurb": "Shaggy blue-feathered cultist in a bird-skull mask. CAW!",
+      "kind": "spire",
+      "signature": "wave",
+      "dance": "Hands in the air"
+    },
+    {
+      "id": "punch",
+      "name": "Punch Construct",
+      "blurb": "Beige blocky automaton with a teal visor and huge fists",
+      "kind": "spire",
+      "signature": "swing",
+      "dance": "Swing step"
+    },
+    {
+      "id": "axebot",
+      "name": "Axebot",
+      "blurb": "Round rusty robot with an anvil head, glowing joints and an axe hand",
+      "kind": "spire",
+      "signature": "robot",
+      "dance": "The robot"
     }
   ]
 }

@@ -55,7 +55,7 @@
     const beat = anchor && room && room.current && room.current.beat;
     Dance.attach(n, { skin: catId, mode, seed, anchor, face, x, bpm: beat && beat.bpm, offset: beat ? beat.offset : null });
   }
-  const SPRITE_VERSION = 7;
+  const SPRITE_VERSION = 8;
   let SPRITE_CLIPS = {};
 
   // Sprite sheets are big (~240KB each), so a skin downloads only once
@@ -86,22 +86,20 @@
 
   // The NPC crowd is the same for everyone: skins and spots come from fixed seeds.
   let npcs = [];
-  // NPCs share a small wardrobe (4 cats + 2 robots, so only 6 sprite sheets
-  // to download) and get variety from a colour tint each instead.
-  const NPC_TINTS = [0, 0, 28, -28, 55, -55, 90, -90];
+  // Every avatar shows up in the crowd once before any repeats; repeats get a
+  // colour tint so they still look different. The order is shuffled the same
+  // way for everyone.
+  const NPC_TINTS = [28, -28, 55, -55, 90, -90, 140, -140];
   function makeNpcs(count) {
     const pick = Dance.seedRand('npc-wardrobe');
-    const shuffled = (list) => list.map((c) => [pick(), c]).sort((a, b) => a[0] - b[0]).map(([, c]) => c.id);
-    const wardrobe = [
-      ...shuffled(CATS.filter((c) => c.kind !== 'robot')).slice(0, 4),
-      ...shuffled(CATS.filter((c) => c.kind === 'robot')).slice(0, 2),
-    ];
+    const order = CATS.map((c) => [pick(), c.id]).sort((a, b) => a[0] - b[0]).map(([, id]) => id);
     return Array.from({ length: count }, (_, i) => {
       const rand = Dance.seedRand('npc:' + i);
+      const repeat = Math.floor(i / order.length);
       return {
         id: 'npc:' + i,
-        skin: wardrobe[Math.floor(rand() * wardrobe.length)],
-        tint: NPC_TINTS[Math.floor(rand() * NPC_TINTS.length)],
+        skin: order[i % order.length],
+        tint: repeat ? NPC_TINTS[Math.floor(rand() * NPC_TINTS.length)] : 0,
         row: i % 3, // 0 = back, 1 = middle, 2 = front (beside the real people)
         jitter: (rand() - 0.5) * 3,
       };
@@ -324,7 +322,9 @@
     decks.replaceChildren();
     let spotIndex = -1;
     for (let i = 0; i < room.maxDjs; i++) {
-      const djId = room.djs[i];
+      // Each DJ sits where they chose; their number is their place in the turn order.
+      const djId = room.seats ? room.seats[i] : room.djs[i];
+      const turnNo = djId ? room.djs.indexOf(djId) + 1 : 0;
       const seat = el('div', 'seat');
       const deck = el('div', 'deck');
       deck.append(el('span', 'platter'), el('span', 'platter'));
@@ -332,7 +332,7 @@
         const playing = c && c.djId === djId;
         if (playing) { spotIndex = i; deck.classList.add('spinning'); }
         seat.append(
-          el('span', 'nametag', userName(djId) + (djId === me.id ? ' (you)' : '')),
+          el('span', 'nametag', `${turnNo}. ` + userName(djId) + (djId === me.id ? ' (you)' : '')),
           catNode(userCat(djId), { size: 'dj', mode: playing ? 'dj' : c ? 'groove' : 'chill', seed: djId, anchor: c ? c.startedAt : 0 }),
         );
       } else {
@@ -342,7 +342,7 @@
           const b = el('button', 'seat-open', narrow ? '+ DJ' : 'Take this seat');
           b.title = 'Take this seat';
           b.type = 'button';
-          b.addEventListener('click', stepUp);
+          b.addEventListener('click', () => stepUp(i));
           seat.append(b);
         }
       }
@@ -468,8 +468,9 @@
   }
   setInterval(updateProgress, 500);
 
-  function stepUp() {
-    socket.emit('dj:up', (res) => {
+  // seat: which booth seat to take (omit for the first free one)
+  function stepUp(seat) {
+    socket.emit('dj:up', Number.isInteger(seat) ? seat : null, (res) => {
       if (res && res.error) {
         openTab('queue');
         setStatus(res.error, true);

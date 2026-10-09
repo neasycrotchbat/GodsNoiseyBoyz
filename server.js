@@ -183,7 +183,8 @@ const io = new Server(server, { maxHttpBufferSize: 64 * 1024 });
 
 // ------------------------------------------------------------------ room state
 const room = {
-  djs: [],        // user ids in seat order
+  djs: [],        // user ids in turn order (the order they sat down)
+  seats: [],      // seat index -> user id or null: where each DJ sits at the booth
   turn: 0,        // index of the next DJ to play
   current: null,  // { song, djId, startedAt, duration, votes: Map, snags: Set }
   online: new Map(), // userId -> socket count
@@ -206,6 +207,7 @@ function roomPayload() {
     serverNow: Date.now(),
     maxDjs: config.maxDjs,
     djs: room.djs,
+    seats: Array.from({ length: config.maxDjs }, (_, i) => room.seats[i] || null),
     listeners: [...room.online.keys()],
     current: c && {
       song: c.song,
@@ -236,13 +238,17 @@ function songQuery(song) {
   let artist = String(song.channel || '').replace(/\s*-\s*Topic$/i, '').replace(/VEVO$/i, '').trim();
   const dash = title.match(/^(.+?)\s+[-–—]\s+(.+)$/);
   if (dash) { artist = dash[1]; title = dash[2]; }
+  title = title.split(/\s+[-–—|]\s+/)[0]; // drop extra " - 45", " - Remastered", " | Lyrics" parts
   title = title.replace(/[([][^)\]]*[)\]]/g, '').replace(/\b(ft\.?|feat\.?|featuring)\s.*$/i, '').replace(/["“”]/g, '').trim();
   artist = artist.replace(/\s*(,|&|\bx\b|ft\.?|feat\.?).*$/i, '').trim();
   return { title, artist };
 }
 
-// GetSongBPM (free key, https://getsongbpm.com/api). Their docs list two hosts; try both.
-const BPM_HOSTS = ['https://api.getsong.co', 'https://api.getsongbpm.com'];
+// GetSongBPM (free key, https://getsongbpm.com/api). The older api.getsongbpm.com
+// host sits behind a bot check, so only the current one is used.
+// Returns the bpm, null if the service doesn't know the song, or undefined if
+// it couldn't be asked (bad or inactive key, network trouble) so it's retried.
+const BPM_HOSTS = ['https://api.getsong.co'];
 async function fetchBpm(title, artist, key) {
   const get = async (url) => {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'X-API-KEY': key } });
@@ -253,10 +259,17 @@ async function fetchBpm(title, artist, key) {
   for (const host of BPM_HOSTS) {
     try {
       const k = encodeURIComponent(key);
+      // Title + artist first; then title alone, but only trusting hits by the same artist.
       const tries = artist ? [['both', `song:${title} artist:${artist}`], ['song', title]] : [['song', title]];
+      const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const sameArtist = (hit) => {
+        const a = norm(hit.artist && hit.artist.name);
+        const b = norm(artist);
+        return !b || (a && (a.includes(b) || b.includes(a)));
+      };
       for (const [type, lookup] of tries) {
         const data = await get(`${host}/search/?api_key=${k}&type=${type}&lookup=${encodeURIComponent(lookup)}`);
-        const hits = Array.isArray(data.search) ? data.search : [];
+        const hits = (Array.isArray(data.search) ? data.search : []).filter((h) => type === 'both' || sameArtist(h));
         for (const hit of hits.slice(0, 5)) {
           let bpm = fit(Number(hit.tempo));
           if (!bpm && hit.id) {
@@ -271,7 +284,7 @@ async function fetchBpm(title, artist, key) {
       console.error(`BPM lookup via ${host} failed:`, e.message);
     }
   }
-  return null;
+  return undefined;
 }
 
 const lookingUp = new Set();
@@ -284,6 +297,7 @@ async function lookupTempo(song) {
     const { title, artist } = songQuery(song);
     if (!title) return;
     const bpm = await fetchBpm(title, artist, config.bpmApiKey);
+    if (bpm === undefined) return; // couldn't ask; try again next time the song plays
     if (db.tempos[song.videoId] && db.tempos[song.videoId].source === 'tap') return; // a tap beat us to it
     db.tempos[song.videoId] = bpm ? { bpm, offset: null, source: 'lookup', at: Date.now() } : { bpm: null, at: Date.now() };
     save();
@@ -316,6 +330,8 @@ function removeDj(uid) {
   if (i === -1) return false;
   room.djs.splice(i, 1);
   if (i < room.turn) room.turn--;
+  const s = room.seats.indexOf(uid);
+  if (s !== -1) room.seats[s] = null;
   return true;
 }
 
@@ -720,7 +736,10 @@ io.on('connection', (socket) => {
   });
 
   // ---- decks
-  socket.on('dj:up', (ack) => {
+  // Take a seat: the one clicked if it's free, else the first free one. Turns
+  // go in the order people sat down, whichever seat they picked.
+  socket.on('dj:up', (seat, ack) => {
+    if (typeof seat === 'function') { ack = seat; seat = null; }
     if (room.djs.includes(uid)) return reply(ack, { ok: true });
     if (room.djs.length >= config.maxDjs) return reply(ack, { error: 'All the DJ seats are taken.' });
     const q = queueOf(uid);
@@ -729,6 +748,11 @@ io.on('connection', (socket) => {
         ? 'Every song in your queue has played. Add new songs, load a playlist, or press "Replay all".'
         : 'Add some songs to your queue first.' });
     }
+    const free = (i) => Number.isInteger(i) && i >= 0 && i < config.maxDjs && !room.seats[i];
+    let at = free(seat) ? seat : -1;
+    for (let i = 0; at === -1 && i < config.maxDjs; i++) if (free(i)) at = i;
+    if (at === -1) return reply(ack, { error: 'All the DJ seats are taken.' });
+    room.seats[at] = uid;
     room.djs.push(uid);
     system(`${me().name} stepped up to the decks.`);
     if (!room.current) playNext();

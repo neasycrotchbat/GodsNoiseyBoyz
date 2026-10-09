@@ -894,7 +894,16 @@ def torso_ribs(cv, W_, view, p, bot):
     cv.group([chain([W_(-8 if not side else -3, -25), W_(8 if not side else 3, -25)], 1.4, "metal")])
 
 
+def _unit(a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    L = math.hypot(dx, dy) or 1.0
+    return dx / L, dy / L
+
+
 def draw_robot(p, bot, view):
+    """Robots and other non-cat avatars: a head, a torso, arms (with optional
+    things in their hands) and legs, a wheel, a thruster, tentacles or nothing
+    at all (floating), all posed by the shared skeleton and moves."""
     side, back = view == "side", view == "back"
     if back:
         p = mirrored(p)
@@ -910,14 +919,30 @@ def draw_robot(p, bot, view):
     sx, sy = bot["shoulder"]
     a1, a2 = bot["arm"]
     ar = bot["arm_r"]
+    arm_c = bot.get("arm_c", "metal")
+    joint_c = lamp(p["glow"]) if bot.get("joint_lamp") else bot.get("joint_c", "metal2")
 
     def limb_group(prims, extra, is_far, cast=True):
         if is_far:
             cv.group([far(q) for q in prims])
-            cv.group([far(q) for q in extra])
+            if extra:
+                cv.group([far(q) for q in extra])
         else:
             cv.group(prims, cast=cast)
-            cv.group(extra)
+            if extra:
+                cv.group(extra)
+
+    def foot_prims(foot, s):
+        kind = bot.get("foot", "shoe")
+        fw = bot.get("foot_w", 4.5)
+        fc = bot.get("foot_c", "metal2")
+        if kind == "talon":  # three thin claws
+            d = 1 if side else s
+            return [chain([foot, (foot[0] + d * 4.5 + o, foot[1] + 2.2)], 0.7, fc, shade=False) for o in (-3.5, 0, 2.5)]
+        if kind == "nub":
+            return [ellipse(foot[0] + (1 if side else s * 0.6), foot[1] + 0.8, fw, 1.8, fc)]
+        fx0 = foot[0] + (2 if side else s * 1.2)
+        return [rbox(lambda x, y: (x, y), fx0 - fw, foot[1] - 1.8, fx0 + fw, foot[1] + 2.2, fc, cut=1.2)]
 
     def legs(which):
         l1, l2 = bot["leg"]
@@ -932,10 +957,10 @@ def draw_robot(p, bot, view):
                 hip = W_(s * bot["hip_w"], 0)
                 foot = (CX + fx * bot.get("stance", 1.0), GROUND - 2.4 - lift)
                 knee, foot = leg_points(hip, foot, s, l1, l2)
-            fw = bot.get("foot_w", 4.5)
-            fx0 = foot[0] + (2 if side else s * 1.2)
-            shoe = rbox(lambda x, y: (x, y), fx0 - fw, foot[1] - 1.8, fx0 + fw, foot[1] + 2.2, "metal2", cut=1.2)
-            limb_group([chain([hip, knee, foot], lr, "metal")], [ellipse(knee[0], knee[1], lr + 0.4, lr + 0.4, "metal2"), shoe], is_far)
+            extra = foot_prims(foot, s)
+            if bot.get("knees", True):
+                extra = [ellipse(knee[0], knee[1], lr + 0.4, lr + 0.4, bot.get("knee_c", joint_c))] + extra
+            limb_group([chain([hip, knee, foot], lr, bot.get("leg_c", "metal"))], extra, is_far)
 
     def wheel():
         top, bot_w, bot_y = bot["skirt"]
@@ -951,7 +976,40 @@ def draw_robot(p, bot, view):
         cv.group([poly([W_(-3, y0 + 4), W_(3, y0 + 4), W_(0, y0 + 4 + L)], "flame", shade=False)], inner=False)
         cv.group([poly([W_(-1.6, y0 + 4), W_(1.6, y0 + 4), W_(0, y0 + 4 + L * 0.6)], "flame2", shade=False)], inner=False)
 
+    def tentacles():
+        # Curling legs under the body; the left pair lifts with the left foot, the right pair with the right.
+        xs = (-3, 3) if side else (-8, -3, 3, 8)
+        for x in xs:
+            lift = p["llift"] if x < 0 else p["rlift"]
+            s = -1 if x < 0 else 1
+            root = W_(x, bot["tent_y"])
+            tip = (root[0] + s * (5 + abs(x) * 0.4), GROUND - 1.5 - lift * 0.8)
+            mid = (root[0] + s * 1.5 + p["px"] * 0.3, (root[1] + tip[1]) / 2 + 1)
+            curl = (tip[0] - s * 2.5, tip[1] - 2.5)
+            limb = chain(bezier(root, mid, tip, 8) + [curl], lambda t, T: 2.3 - 1.1 * t / T, "acc")
+            limb_group([limb], None, side and x < 0)
+
+    def hand_prims(elbow, hand, s):
+        kind = bot.get("hand_kind", "ball")
+        hc = bot.get("hand", "metal2")
+        d = _unit(elbow, hand)
+        n = (-d[1], d[0])
+        if kind == "fist":
+            return [ellipse(hand[0] + d[0], hand[1] + d[1], ar + 2.2, ar + 2.2, hc)]
+        if kind == "claw":
+            return [ellipse(hand[0], hand[1], ar + 0.6, ar + 0.6, hc)] + [
+                chain([hand, (hand[0] + d[0] * 3.5 + n[0] * o, hand[1] + d[1] * 3.5 + n[1] * o)], 0.8, hc, shade=False) for o in (-2, 2)]
+        if kind == "branch":  # coral fingers
+            return [chain([hand, (hand[0] + d[0] * 4 + n[0] * o, hand[1] + d[1] * 4 + n[1] * o)], 0.8, hc, shade=False) for o in (-2.5, 0, 2.5)]
+        if kind == "wing":  # a feathered wingtip
+            return [poly([(hand[0] + n[0] * 2.4, hand[1] + n[1] * 2.4), (hand[0] - n[0] * 2.4, hand[1] - n[1] * 2.4),
+                          (hand[0] + d[0] * 6, hand[1] + d[1] * 6)], hc)]
+        if kind == "none":
+            return []
+        return [ellipse(hand[0], hand[1], ar + 0.9, ar + 0.9, hc)]
+
     def arms(which):
+        held = bot.get("held", {})
         for ua, fa, s, is_far in which:
             if side:
                 sh = W_(-1.5 if is_far else 1.5, sy)
@@ -959,11 +1017,29 @@ def draw_robot(p, bot, view):
             else:
                 sh = W_(s * sx, sy)
                 elbow, hand = arm_points(sh, ua, fa, s, a1, a2)
-            limb_group([chain([sh, elbow, hand], ar, "metal"), ellipse(sh[0], sh[1], ar + 0.9, ar + 0.9, "metal2")],
-                       [ellipse(elbow[0], elbow[1], ar * 0.8, ar * 0.8, "metal2"),
-                        ellipse(hand[0], hand[1], ar + 0.9, ar + 0.9, bot.get("hand", "metal2"))], is_far, cast=not back)
+            prims = [chain([sh, elbow, hand], ar, arm_c)]
+            extra = hand_prims(elbow, hand, s)
+            if bot.get("joints", True):
+                prims.append(ellipse(sh[0], sh[1], ar + 0.9, ar + 0.9, joint_c))
+                extra = [ellipse(elbow[0], elbow[1], ar * 0.8, ar * 0.8, joint_c)] + extra
+            # What's in this hand. The skeleton's right arm is screen-right from
+            # the front; mirrored() swaps the arms for the back view, so swap back.
+            key = "R" if s > 0 else "L"
+            if back:
+                key = "L" if key == "R" else "R"
+            item = held.get(key)
+            item_prims = item(elbow, hand, _unit(elbow, hand), p) if item else None
+            if item_prims and is_far:
+                cv.group([far(q) for q in item_prims])
+            limb_group(prims, extra, is_far, cast=not back)
+            if item_prims and not is_far:
+                cv.group(item_prims)
 
     L_ARM, R_ARM = (p["la"], p["lf"], -1), (p["ra"], p["rf"], 1)
+    if bot.get("behind"):
+        bot["behind"](cv, W_, view, p, bot)
+    if bot.get("tail") and not back:
+        bot["tail"](cv, W_, view, p, bot)
     if side:
         arms([(*L_ARM, True)])
     move = bot["move"]
@@ -974,11 +1050,16 @@ def draw_robot(p, bot, view):
             legs([(p["lfx"], p["llift"], -1, False), (p["rfx"], p["rlift"], 1, False)])
     elif move == "wheel":
         wheel()
-    else:
+    elif move == "jet":
         jet()
+    elif move == "tentacles":
+        tentacles()
+    # "float": nothing under the body; the torso draws its own hem
     if back:
         arms([(*L_ARM, False), (*R_ARM, False)])
     bot["torso"](cv, W_, view, p, bot)
+    if bot.get("tail") and back:
+        bot["tail"](cv, W_, view, p, bot)
     if side:
         arms([(*R_ARM, False)])
     elif not back:
@@ -987,9 +1068,352 @@ def draw_robot(p, bot, view):
     hang = lean * 0.6 + p["tilt"] * (0.5 if side else 0.8)
     hc = W_(p["hx"] * 0.3 + (1 if side else 0), bot["neck"] + p["hy"])
     if bot.get("neck_r"):
-        cv.group([chain([W_(0, sy - 1), hc], bot["neck_r"], "metal2")])
+        cv.group([chain([W_(0, sy - 1), hc], bot["neck_r"], bot.get("neck_c", "metal2"))])
     bot["head"](cv, head_frame(hc, hang), view, p, bot)
+    if bot.get("front"):
+        bot["front"](cv, W_, view, p, bot)
     return cv.render(bot["pal"], CX + p["px"] * 0.6, shadow_k(p) * (0.55 if fl else 1.0))
+
+
+# ------------------------------------------------------------------ Slay the Spire 2 cast (fan art)
+# Characters and enemies from Slay the Spire 2 by Mega Crit, drawn as fan art
+# on the shared skeleton. Their specials glow on the beat like the robots'.
+def _at(o, d, k, n=(0, 0), j=0):
+    """Point o + d*k + n*j."""
+    return (o[0] + d[0] * k + n[0] * j, o[1] + d[1] * k + n[1] * j)
+
+
+# ---- things in hands: (elbow, hand, direction of the forearm, pose) -> primitives
+def held_sword(elbow, hand, d, p):
+    n = (-d[1], d[0])
+    base, tip = _at(hand, d, 2.5), _at(hand, d, 17)
+    prims = [
+        poly([_at(base, n, 0, n, 1.9), _at(tip, n, 0, n, 0.7), _at(tip, d, 1.6), _at(base, n, 0, n, -1.7)], "blade"),
+        chain([_at(base, d, 0, n, 3.3), _at(base, d, 0, n, -3.3)], 0.9, "metal2"),
+        ellipse(*_at(hand, d, -2.6), 1.2, 1.2, "metal2"),
+    ]
+    if p["glow"] > 0.6:  # a glint runs down the blade on the beat
+        prims.append(pix([_at(hand, d, 9), _at(hand, d, 10)], "glint"))
+    return prims
+
+
+def held_dagger(elbow, hand, d, p):
+    return [chain([_at(hand, d, 1.5), _at(hand, d, 8.5)], lambda t, T: 1.5 - 0.9 * t / T, lamp(p["glow"]), shade=False)]
+
+
+def held_scythe(elbow, hand, d, p):
+    n = (-d[1], d[0])
+    top = _at(hand, d, 13)
+    return [
+        chain([_at(hand, d, -9), top], 0.8, "wood"),
+        chain([top, _at(top, d, 1.5, n, 4.5), _at(top, d, -1.2, n, 9.5)], lambda t, T: 1.7 - 1.2 * t / T, "blade"),
+    ]
+
+
+def held_hook(elbow, hand, d, p):
+    n = (-d[1], d[0])
+    top = _at(hand, d, 10)
+    return [
+        chain([_at(hand, d, -5), top], 0.75, "acc2"),
+        chain([top, _at(top, d, 2.6, n, 2), _at(top, d, 0.5, n, 4.2), _at(top, d, -2, n, 3.6)], 0.8, "acc2"),
+    ]
+
+
+def held_axe(elbow, hand, d, p):
+    n = (-d[1], d[0])
+    tip = _at(hand, d, 5.5)
+    blades = [poly([_at(tip, d, 0, n, sg * 1), _at(tip, d, 3.4, n, sg * 6), _at(tip, d, 0, n, sg * 7.2), _at(tip, d, -3.4, n, sg * 6)], "blade")
+              for sg in (1, -1)]
+    return [chain([hand, tip], 1.1, "metal2")] + blades
+
+
+# ---- Ironclad: gold armour, red-eyed helm, grey beard, a big sword
+def torso_ironclad(cv, W_, view, p, bot):
+    w = 6.5 if view == "side" else 8.5
+    cv.group([rbox(W_, -w, -25, w, -1, "acc2", cut=2.5)], cast=True)
+    plate = {"front": (-6, 6), "back": (-6.5, 6.5), "side": (-1, 6)}[view]
+    cv.group([rbox(W_, plate[0], -23, plate[1], -10, "metal", cut=2)])
+    cv.group([chain([W_(-w, -3.5), W_(w, -3.5)], 1.3, "metal2")])
+
+
+def head_ironclad(cv, Hp, view, p, bot):
+    ek = eye_key(p["glow"])
+    if view == "side":
+        cv.group([ellipse(*Hp(0, -1), 7.6, 8, "metal")], cast=True)
+        cv.group([chain([Hp(-6, -5), Hp(-1, -9.6), Hp(5, -7.5)], 1.2, "metal2")])
+        cv.group([rbox(Hp, 1.5, -1.8, 8, 1, "dark", cut=0.6, shade=False)])
+        cv.group([pix([Hp(5.5, -0.5)], ek)], inner=False)
+        cv.group([poly([Hp(1.5, 3), Hp(7.5, 2.5), Hp(5, 9.5), Hp(1, 7.5)], "beard")])
+        return
+    cv.group([ellipse(*Hp(0, -1), 8, 8.2, "metal")], cast=True)
+    cv.group([chain([Hp(0, -9.6), Hp(0, -3)], 1.3, "metal2")])
+    if view == "back":
+        return
+    cv.group([rbox(Hp, -6, -1.8, 6, 1.2, "dark", cut=0.6, shade=False)])
+    cv.group([pix([Hp(2, -0.5), Hp(3, -0.5)], ek)], inner=False)
+    cv.group([poly([Hp(-5, 2.2), Hp(5, 2.2), Hp(3.6, 9), Hp(0, 10.8), Hp(-3.6, 9)], "beard")])
+
+
+# ---- Silent: green cloak, antlered skull mask, bandages, twin glowing daggers
+def torso_silent(cv, W_, view, p, bot):
+    if view == "back":
+        cv.group([poly([W_(-9, -26), W_(9, -26), W_(13, 4), W_(0, 6.5), W_(-13, 4)], "acc")], cast=True)
+        return
+    if view == "side":
+        cv.group([poly([W_(-2, -26), W_(3, -26), W_(1, 4), W_(-12, 5)], "acc")])
+        cv.group([rbox(W_, -1, -24, 5, -6, "metal", cut=1.5)], cast=True)
+        return
+    cv.group([rbox(W_, -5, -24, 5, -6, "metal", cut=1.5)], cast=True)
+    # The cloak wraps around, leaving a narrow gap down the front.
+    cv.group([poly([W_(-9, -25.5), W_(-0.6, -25.5), W_(-1.8, 3.5), W_(-13, 4.5)], "acc"),
+              poly([W_(0.6, -25.5), W_(9, -25.5), W_(13, 4.5), W_(1.8, 3.5)], "acc")])
+
+
+def head_silent(cv, Hp, view, p, bot):
+    ek = eye_key(p["glow"])
+    sides = (1,) if view == "side" else (-1, 1)
+    for s in sides:  # antlers rise out of the hood
+        x0 = -1 if view == "side" else s * 4
+        cv.group([chain([Hp(x0, -6), Hp(x0 + s * 3.5, -12), Hp(x0 + s * 5.5, -16)], 1.0, "antler"),
+                  chain([Hp(x0 + s * 2.6, -10.5), Hp(x0 + s * 6, -11)], 0.8, "antler")])
+    if view == "side":
+        cv.group([ellipse(*Hp(-1, -1), 8, 8.8, "acc")], cast=True)
+        cv.group([ellipse(*Hp(3.5, 1), 4, 5.2, "bone"), rbox(Hp, 5, 2.5, 10, 6.5, "bone", cut=1.5)])
+        cv.group([ellipse(*Hp(4.5, 0), 1.3, 1.3, "dark", shade=False)], inner=False)
+        cv.group([pix([Hp(4.5, 0)], ek)], inner=False)
+        return
+    cv.group([ellipse(*Hp(0, -1), 8.6, 9, "acc")], cast=True)
+    if view == "back":
+        return
+    cv.group([ellipse(*Hp(0, 1.5), 5.2, 5.5, "bone"), rbox(Hp, -2.6, 3.5, 2.6, 8, "bone", cut=1.2)])
+    cv.group([ellipse(*Hp(-2.2, 0.6), 1.4, 1.4, "dark", shade=False), ellipse(*Hp(2.2, 0.6), 1.4, 1.4, "dark", shade=False)], inner=False)
+    cv.group([pix([Hp(-2.2, 0.6), Hp(2.2, 0.6)], ek)], inner=False)
+
+
+# ---- Regent: a little star-crowned king riding a stone throne on tentacles
+def _throne(cv, W_, view):
+    if view == "side":
+        cv.group([poly([W_(-6, 7), W_(5, 7), W_(5, -34), W_(0, -47), W_(-6, -38)], "metal")], cast=True)
+    else:
+        cv.group([poly([W_(-10, 7), W_(10, 7), W_(10, -35), W_(3, -48), W_(-6, -45), W_(-10, -37)], "metal")], cast=True)
+        if view == "front":
+            cv.group([poly([W_(-6.5, -14), W_(6.5, -14), W_(6.5, -33), W_(1.5, -41), W_(-6.5, -36)], "dark")])
+
+
+def behind_regent(cv, W_, view, p, bot):
+    if view != "back":
+        _throne(cv, W_, view)
+
+
+def torso_regent(cv, W_, view, p, bot):
+    if view == "back":  # from behind, the throne hides the king (and his arms)
+        _throne(cv, W_, view)
+        return
+    x = 2 if view == "side" else 0
+    cv.group([ellipse(*W_(x, -22), 6 if view == "side" else 7, 5, "acc2")], cast=True)
+    cv.group([chain([W_(x - 4, -26), W_(x, -24), W_(x + 4, -26)], 1.1, "acc")])
+
+
+def head_regent(cv, Hp, view, p, bot):
+    if view == "back":
+        return
+    pts = []
+    for i in range(12):
+        a = math.pi * 2 * i / 12 - math.pi / 2
+        r = 7.5 if i % 2 == 0 else 3.6
+        pts.append(Hp(r * math.cos(a) * (0.75 if view == "side" else 1), r * math.sin(a)))
+    cv.group([poly(pts, "acc")], cast=True)
+    ex = 1.5 if view == "side" else 0
+    cv.group([ellipse(*Hp(ex, 0.8), 2.8, 3, "dark", shade=False)])
+    cv.group([ellipse(*Hp(ex, 0.5), 1.3, 1.3, lamp(p["glow"]), shade=False)], inner=False)
+
+
+# ---- Necrobinder: a floating lich with blue flame hair, a scythe, and Osty the hand
+def torso_necro(cv, W_, view, p, bot):
+    w = 0.7 if view == "side" else 1.0
+    cv.group([poly([W_(-7 * w, -26), W_(-9.5 * w, -36), W_(-3 * w, -26)], "acc"),
+              poly([W_(7 * w, -26), W_(9.5 * w, -36), W_(3 * w, -26)], "acc")])  # high collar
+    hem = [W_(10 * w, 10), W_(7 * w, 14), W_(4 * w, 11), W_(1 * w, 15), W_(-2 * w, 11), W_(-5 * w, 14), W_(-9 * w, 10)]
+    cv.group([ellipse(*W_(-2, 16), 1.4, 1.1, "metal"), ellipse(*W_(2.2, 15), 1.4, 1.1, "metal")])  # dangling bony feet
+    cv.group([poly([W_(-6 * w, -26), W_(6 * w, -26)] + hem, "acc")], cast=True)
+    if view == "front":
+        cv.group([poly([W_(-2.5, -25), W_(2.5, -25), W_(0.8, -7), W_(-0.8, -7)], "acc2")])
+        cv.group([pix([W_(-1, y) for y in (-21, -17, -13)] + [W_(1, y) for y in (-21, -17, -13)], "metal")], inner=False)
+
+
+def head_necro(cv, Hp, view, p, bot):
+    g = p["glow"]
+    flick = 4 * g + 2 * p["ext"]
+    xs = (-1, 1) if view == "side" else (-5, 5)
+    cv.group([poly([Hp(xs[0], -2), Hp(-3, -11 - flick), Hp(-1, -6), Hp(1, -13 - flick), Hp(3, -6),
+                    Hp(5, -10 - flick * 0.8), Hp(xs[1] + 1, -2)], "flame", shade=False)], inner=False)
+    cv.group([poly([Hp(-2, -3), Hp(0, -9 - flick * 0.7), Hp(2, -3)], "flame2", shade=False)], inner=False)
+    sx = 1.5 if view == "side" else 0
+    cv.group([ellipse(*Hp(sx, 0), 5 if view == "side" else 5.5, 6, "metal"), rbox(Hp, sx - 3, 3, sx + 3, 6.5, "metal", cut=1)], cast=True)
+    if view == "back":
+        return
+    eyes = [(3.5, 0)] if view == "side" else [(-2, 0), (2, 0)]
+    cv.group([ellipse(*Hp(x, y), 1.4, 1.5, "dark", shade=False) for x, y in eyes], inner=False)
+    cv.group([pix([Hp(x, 5) for x in (sx - 2, sx, sx + 2)], "dark")], inner=False)
+
+
+def front_necro(cv, W_, view, p, bot):
+    """Osty, the Necrobinder's trusty left hand, bobbing beside her."""
+    x = {"front": -14, "back": 14, "side": -9}[view]
+    c = W_(x, -16 + 2 * math.sin(math.pi * 2 * p["ext"]))
+    fingers = [chain([(c[0] + o, c[1] - 1), (c[0] + o * 1.3, c[1] - 4.5)], 0.6, "metal", shade=False) for o in (-1.6, -0.5, 0.6, 1.7)]
+    prims = [ellipse(c[0], c[1], 2.5, 2, "metal")] + fingers
+    cv.group([far(q) for q in prims] if view == "side" else prims)
+
+
+# ---- Defect: a gold automaton with a crown of a head holding one big blue orb
+def torso_defect(cv, W_, view, p, bot):
+    if view == "back":
+        cv.group([rbox(W_, -8, -25, 8, -4, "metal", cut=2.5)], cast=True)
+        cv.group([poly([W_(-11, -27), W_(11, -27), W_(12, -3), W_(-12, -3)], "acc")])
+        return
+    if view == "side":
+        cv.group([poly([W_(-1, -27), W_(4, -27), W_(-3, -6), W_(-10, -8)], "acc")])
+        cv.group([rbox(W_, -5, -25, 6, -4, "metal", cut=2.5)], cast=True)
+        cv.group([ellipse(*W_(4.5, -15), 2, 3, lamp(p["glow"]), shade=False)], inner=False)
+        return
+    cv.group([rbox(W_, -8, -25, 8, -4, "metal", cut=2.5)], cast=True)
+    cv.group([ellipse(*W_(0, -15), 4.2, 4.2, "dark", shade=False)])
+    cv.group([ellipse(*W_(0, -15), 2.7, 2.7, lamp(p["glow"]), shade=False)], inner=False)
+    cv.group([poly([W_(-11.5, -27), W_(-2, -27.5), W_(-7, -15), W_(-13, -18)], "acc"),
+              poly([W_(11.5, -27), W_(2, -27.5), W_(7, -15), W_(13, -18)], "acc")])
+
+
+def head_defect(cv, Hp, view, p, bot):
+    w = 0.65 if view == "side" else 1.0
+    cv.group([poly([Hp(-9 * w, 4), Hp(9 * w, 4), Hp(10 * w, -4), Hp(6 * w, -2), Hp(4 * w, -9), Hp(0, -5),
+                    Hp(-4 * w, -9), Hp(-6 * w, -2), Hp(-10 * w, -4)], "metal")], cast=True)
+    if view == "back":
+        return
+    ox = 3 if view == "side" else 0
+    cv.group([ellipse(*Hp(ox, 0), 4.6 * w + 0.4, 4.6, "dark", shade=False)])
+    cv.group([ellipse(*Hp(ox, 0), 3.4 * w + 0.3, 3.4, lamp(p["glow"]), shade=False)], inner=False)
+    cv.group([pix([Hp(ox - 1, -1.5)], "glint")], inner=False)
+
+
+# ---- Byrdonis: a lanky green bird with a hooked pink beak and a long swinging tail
+def torso_byrd(cv, W_, view, p, bot):
+    w = 0.8 if view == "side" else 1.0
+    lo, up = W_(0, -9), W_(0.5 if view == "side" else 0, -17)
+    cv.group([blob([(lo[0], lo[1], 8.5 * w, 9.5, 0, 0.12), (up[0], up[1], 7 * w, 7, 0, 0.12)], "acc")], cast=True)
+
+
+def tail_byrd(cv, W_, view, p, bot):
+    sw = p["tail"] + p["swing"]
+    if view == "side":
+        base = W_(-6, -6)
+        ctrl = (base[0] - 9, base[1] + 3 + 2 * math.sin(math.radians(sw)))
+        tx, ty = rot(-9, -6, sw * 0.5)
+        tip = (base[0] - 8 + tx, base[1] + ty)
+    else:
+        base = W_(1.5 if view == "back" else 6, -4)
+        ctrl = (base[0] + 12 + 2 * math.sin(math.radians(sw)), base[1] + 4)
+        tx, ty = rot(8, -12, sw)
+        tip = (base[0] + 9 + tx, base[1] + ty)
+    cv.group([chain(bezier(base, ctrl, tip), lambda s, T: 2.4 - 1.0 * s / T, "acc")])
+    cv.group([poly([(tip[0] - 2.5, tip[1] - 1), (tip[0] + 2.5, tip[1] - 1), (tip[0] + 1, tip[1] - 6.5), (tip[0] - 1, tip[1] - 6.5)], "acc2")])
+
+
+def head_byrd(cv, Hp, view, p, bot):
+    cv.group([poly([Hp(-1.8, -5), Hp(0, -10), Hp(1.8, -5)], "acc2")])  # crest
+    cv.group([ellipse(*Hp(0, 0), 6 if view == "side" else 6.6, 5.8, "acc")], cast=True)
+    if view == "back":
+        return
+    if view == "side":
+        cv.group([poly([Hp(4, -1.5), Hp(10.5, -0.5), Hp(12, 3.6), Hp(10, 2.8), Hp(4.5, 2.8)], "beak")])
+        cv.group([pix([Hp(2.5, -1.5)], "eye")], inner=False)
+        return
+    # Head-on, the hooked beak is a short wide wedge with its hook curling down.
+    cv.group([poly([Hp(-3.4, 0.6), Hp(3.4, 0.6), Hp(1.2, 4.6), Hp(0, 6.2), Hp(-1.2, 4.6)], "beak")])
+    cv.group([pix([Hp(0, 5), Hp(0, 5.8)], "beak_s")], inner=False)
+    cv.group([pix([Hp(-3, -1.6), Hp(3, -1.6)], "eye")], inner=False)
+
+
+# ---- Skulking Colony: a walking reef of coral and barnacles with a coral spire for a head
+def torso_colony(cv, W_, view, p, bot):
+    w = 0.75 if view == "side" else 1.0
+    lo, up = W_(0, -8), W_(0, -18)
+    cv.group([blob([(lo[0], lo[1], 8 * w, 9, 0, 0.15), (up[0], up[1], 7.5 * w, 7.5, 0, 0.15)], "acc")], cast=True)
+    spots = [(-6, -22, 3), (6, -21, 2.6), (-3, -12, 2), (4, -8, 1.8)] if view != "side" else [(-2, -21, 2.6), (3, -12, 2)]
+    cv.group([ellipse(*W_(x * w, y), r, r, "acc2") for x, y, r in spots])
+    if view != "back":  # the barnacles glow on the beat
+        cv.group([pix([W_(x * w, y) for x, y, _ in spots], lamp(p["glow"]))], inner=False)
+
+
+def head_colony(cv, Hp, view, p, bot):
+    w = 0.8 if view == "side" else 1.0
+    cv.group([rbox(Hp, -2 * w, -16, 2 * w, -6, "bone", cut=1)])
+    cv.group([ellipse(*Hp(0, -16), 2.6 * w, 1.5, "bone")])
+    cv.group([ellipse(*Hp(0, -6), 3.8 * w, 4, "acc", jag=0.2), ellipse(*Hp(0, 0), 4.8 * w, 4.2, "acc", jag=0.2)], cast=True)
+
+
+# ---- Cultist (the original): shaggy blue feathers, a bird-skull mask, a hooked staff in each hand
+def _feathers(s, t):
+    return "acc_s" if int(s * 0.9 + t * 0.4 + 40) % 5 == 0 else "acc"
+
+
+def torso_cultist(cv, W_, view, p, bot):
+    w = 0.75 if view == "side" else 1.0
+    lo, up = W_(0, -10), W_(0, -21)
+    cv.group([blob([(lo[0], lo[1], 10 * w, 12, 0, 0.16), (up[0], up[1], 8 * w, 7, 0, 0.16)], _feathers)], cast=True)
+
+
+def head_cultist(cv, Hp, view, p, bot):
+    cv.group([ellipse(*Hp(0, 1), 8 if view != "side" else 7, 7, _feathers, jag=0.16)])
+    if view == "back":
+        cv.group([ellipse(*Hp(0, -1), 5.5, 5.5, "bone")])
+        return
+    if view == "side":
+        cv.group([ellipse(*Hp(1.5, -1), 5, 5.5, "bone"), poly([Hp(3, 0), Hp(4.5, 3), Hp(11.5, 7.5), Hp(10, 8.5), Hp(3, 4.5)], "bone")])
+        cv.group([ellipse(*Hp(3, -1), 1.4, 1.5, "dark", shade=False)], inner=False)
+        return
+    cv.group([ellipse(*Hp(0, -1), 5.5, 5.5, "bone"), poly([Hp(-2.3, 2), Hp(2.3, 2), Hp(0.6, 10.5), Hp(-0.6, 10.5)], "bone")])
+    cv.group([ellipse(*Hp(-2.2, -1), 1.5, 1.6, "dark", shade=False), ellipse(*Hp(2.2, -1), 1.5, 1.6, "dark", shade=False)], inner=False)
+
+
+# ---- Punch Construct: a beige blocky automaton with a teal visor and huge fists
+def torso_punch(cv, W_, view, p, bot):
+    w = 7 if view == "side" else 10
+    cv.group([rbox(W_, -w, -26, w, -4, "metal", cut=3)], cast=True)
+    if view == "front":
+        cv.group([ellipse(*W_(0, -15), 5, 5, "dark")])
+        cv.group([pix([W_(x, y) for x, y in ((-2, -18), (2, -18), (3, -15), (2, -12), (-2, -12), (-3, -15))], "metal2")], inner=False)
+    elif view == "back":
+        cv.group([pix([W_(x, y) for x in (-5, 0, 5) for y in (-20, -14, -8)], "metal2")], inner=False)
+
+
+def head_punch(cv, Hp, view, p, bot):
+    w = 0.8 if view == "side" else 1.0
+    for s in ((1,) if view == "side" else (-1, 1)):
+        x0 = -1 if view == "side" else s * 5
+        cv.group([poly([Hp(x0, -3), Hp(x0 + s * 3, -9.5), Hp(x0 - s * 2, -4.5)], "metal")])
+    cv.group([rbox(Hp, -5 * w, -4.5, 5 * w, 4.5, "metal", cut=1.5)], cast=True)
+    if view == "back":
+        return
+    x0, x1 = (1, 5) if view == "side" else (-4, 4)
+    cv.group([rbox(Hp, x0, -1.6, x1, 1.6, lamp(p["glow"]), cut=0.6, shade=False)])
+
+
+# ---- Axebot: a round rusty robot with an anvil head, glowing joints and an axe for a hand
+def torso_axebot(cv, W_, view, p, bot):
+    w = 0.8 if view == "side" else 1.0
+    cv.group([ellipse(*W_(0, -11), 11 * w, 11.5, "metal")], cast=True)
+    cv.group([chain([W_(-10 * w, -7.5), W_(10 * w, -7.5)], 1.0, lamp(p["glow"]), shade=False)])
+    if view == "front":
+        cv.group([ellipse(*W_(0, -15), 2.6, 2.6, "metal2")])
+
+
+def head_axebot(cv, Hp, view, p, bot):
+    w = 0.75 if view == "side" else 1.0
+    cv.group([poly([Hp(-9 * w, -4), Hp(9 * w + (3 if view == "side" else 0), -4), Hp(6 * w, 0.5), Hp(3 * w, 0.5),
+                    Hp(3 * w, 4.5), Hp(-3 * w, 4.5), Hp(-3 * w, 0.5), Hp(-6 * w, 0.5)], "dark")], cast=True)
+    if view != "back":
+        cv.group([pix([Hp(-1 if view != "side" else 1.5, 2), Hp(1 if view != "side" else 2.5, 2)], lamp(p["glow"]))], inner=False)
 
 
 # ------------------------------------------------------------------ fur patterns
@@ -1478,6 +1902,110 @@ ROBOTS = [
 ]
 CATS += ROBOTS
 
+# Slay the Spire 2 cast (fan art of Mega Crit's characters and enemies).
+LAMP_RED = dict(eye="#e0302a", eye_on="#ff8a5c")
+SPIRE = [
+    {
+        "id": "ironclad", "name": "Ironclad", "blurb": "Gold-armoured soldier with a red-eyed helm and a huge sword", "signature": "stomp",
+        "bot": dict(move="legs", hip=21.5, hip_w=4.5, leg=(10.5, 10.5), leg_r=2.8, leg_c="acc", knee_c="metal", foot_c="metal",
+                    shoulder=(9, -22), arm=(8.5, 8), arm_r=2.3, arm_c="acc2", joint_c="metal", hand="metal",
+                    neck=-31, head=head_ironclad, torso=torso_ironclad, held={"R": held_sword},
+                    pal=robot_pal("#1a1214", dict(LAMP_RED, glint="#ffffff"),
+                                  metal=("#d8a548", "#f2cd7c", "#a2742c"), metal2=("#8f6428", "#a9772f", "#6c4a1c"),
+                                  acc=("#7a2b28", "#963a34", "#561c1a"), acc2=("#3a3135", "#4b4046", "#29222a"),
+                                  dark=("#1c1618", "#2a2226", "#120d0f"), beard=("#b4b0a8", "#d2cec6", "#8e8a82"),
+                                  blade=("#d6dce2", "#ffffff", "#9aa4ae"))),
+    },
+    {
+        "id": "silent", "name": "Silent", "blurb": "Hooded huntress in an antlered skull mask, with twin glowing daggers", "signature": "shuffle",
+        "bot": dict(move="legs", hip=21.5, hip_w=3.5, leg=(10.5, 10.5), leg_r=2.0, leg_c="metal", knees=False, foot="nub", foot_c="metal",
+                    foot_w=2.6, shoulder=(7, -22), arm=(8.5, 8), arm_r=1.8, arm_c="metal", joints=False, hand="metal",
+                    neck=-31, head=head_silent, torso=torso_silent, held={"L": held_dagger, "R": held_dagger},
+                    pal=robot_pal("#171a16", dict(eye="#7fd37f", eye_on="#d4ffa8", lamp_off="#2f6f78", lamp_dim="#5fd0d8", lamp_on="#c4fcff"),
+                                  acc=("#4c9a78", "#6ab894", "#356c54"), metal=("#e6dcc2", "#fbf3df", "#bfb398"),
+                                  metal2=("#a89a7a", "#bcae8c", "#867a5e"), bone=("#efe8d8", "#ffffff", "#c8bfa8"),
+                                  antler=("#c7a46a", "#ddbd86", "#9c7c46"), dark=("#1d1a18", "#2a2622", "#141210"))),
+    },
+    {
+        "id": "regent", "name": "Regent", "blurb": "Star-crowned heir riding a stone throne on tentacles", "signature": "disco",
+        "bot": dict(move="tentacles", hip=21, tent_y=6, shoulder=(6, -25), arm=(5, 4.5), arm_r=1.6, arm_c="acc2", joints=False,
+                    hand="acc", neck=-32, head=head_regent, torso=torso_regent, behind=behind_regent,
+                    pal=robot_pal("#141218", dict(lamp_off="#6b5a1e", lamp_dim="#e0b030", lamp_on="#fff06a"),
+                                  metal=("#4b4752", "#625d6b", "#36323c"), metal2=("#2f2c34", "#3c3842", "#221f26"),
+                                  acc=("#d9722a", "#f08f45", "#a9531a"), acc2=("#3d55b2", "#5873cf", "#2b3d83"),
+                                  dark=("#16141a", "#201d25", "#0f0d12"))),
+    },
+    {
+        "id": "necrobinder", "name": "Necrobinder", "blurb": "Floating lich with blue flame hair, a scythe and Osty the hand", "signature": "wave",
+        "bot": dict(move="float", float=6, hip=18, shoulder=(6.5, -23), arm=(8, 7.5), arm_r=1.1, arm_c="metal", joints=False,
+                    hand="metal", neck=-32, head=head_necro, torso=torso_necro, front=front_necro, held={"R": held_scythe},
+                    pal=robot_pal("#140c16", dict(flame="#3f7cff", flame2="#c4e4ff"),
+                                  acc=("#a9336f", "#c94f8e", "#7b2251"), acc2=("#4b1d4d", "#5e2961", "#36123a"),
+                                  metal=("#e8e3d4", "#ffffff", "#bdb4a0"), dark=("#1a1220", "#24182c", "#120c16"),
+                                  blade=("#c9d1da", "#f2f6fa", "#8f99a5"), wood=("#3a3036", "#4b4046", "#2a2226"))),
+    },
+    {
+        "id": "defect", "name": "Defect", "blurb": "Gold automaton with a teal cloak and one big blue orb", "signature": "robot",
+        "bot": dict(move="legs", hip=21, hip_w=5, leg=(10, 10.5), leg_r=3.2, foot_w=5, shoulder=(9.5, -23), arm=(8.5, 8),
+                    arm_r=2.6, hand_kind="claw", hand="metal", neck=-33, neck_r=2.2, neck_c="dark",
+                    head=head_defect, torso=torso_defect,
+                    pal=robot_pal("#1a1610", dict(lamp_off="#1d3a66", lamp_dim="#3f9fe0", lamp_on="#aaeeff", glint="#ffffff"),
+                                  metal=("#dcb35a", "#f4d68e", "#a8812f"), metal2=("#9c7631", "#b88d3d", "#77592a"),
+                                  acc=("#2c8a9b", "#48aabb", "#1f6676"), dark=("#2f2f39", "#3f3f4b", "#20202a"))),
+    },
+    {
+        "id": "byrdonis", "name": "Byrdonis", "blurb": "Lanky green bird with a hooked beak and a swinging tail", "signature": "kneeup",
+        "bot": dict(move="legs", hip=24, hip_w=3, leg=(12, 12.5), leg_r=1.4, leg_c="metal", knees=False, foot="talon", foot_c="dark",
+                    shoulder=(6.5, -18), arm=(5.5, 5.5), arm_r=2.2, arm_c="acc", joints=False, hand_kind="wing", hand="acc",
+                    neck=-35, neck_r=2.6, neck_c="acc", head=head_byrd, torso=torso_byrd, tail=tail_byrd,
+                    pal=robot_pal("#152010", dict(eye="#141414"),
+                                  acc=("#74c444", "#98df6a", "#4f9430"), acc2=("#b9ee8c", "#d8ffb4", "#8cc066"),
+                                  metal=("#8a9578", "#a3ad90", "#69725a"), beak=("#e2687a", "#f48c9c", "#b44a5c"),
+                                  dark=("#1e1e1e", "#2c2c2c", "#121212"))),
+    },
+    {
+        "id": "colony", "name": "Skulking Colony", "blurb": "A walking reef of coral and glowing barnacles", "signature": "elbows",
+        "bot": dict(move="legs", hip=22, hip_w=4, leg=(11, 11.5), leg_r=1.9, leg_c="metal", knees=False, foot="talon", foot_c="metal",
+                    shoulder=(7, -22), arm=(10, 10), arm_r=1.9, arm_c="metal", joints=False, hand_kind="branch", hand="metal",
+                    neck=-31, neck_r=2.0, neck_c="acc", head=head_colony, torso=torso_colony,
+                    pal=robot_pal("#1a1214", dict(lamp_off="#4a3a70", lamp_dim="#9a80e0", lamp_on="#e6d8ff"),
+                                  acc=("#a6442f", "#c45f44", "#78301f"), metal=("#9cc1df", "#c3dbef", "#6f95b7"),
+                                  acc2=("#8c79c9", "#ab9be2", "#6a589f"), bone=("#e9dfcf", "#ffffff", "#c4b8a5"))),
+    },
+    {
+        "id": "cultist", "name": "Cultist", "blurb": "Shaggy blue-feathered cultist in a bird-skull mask. CAW!", "signature": "wave",
+        "bot": dict(move="legs", hip=21.5, hip_w=3, leg=(10.5, 11), leg_r=1.4, leg_c="metal", knees=False, foot="nub", foot_c="metal",
+                    foot_w=2.5, shoulder=(8, -21), arm=(8.5, 8), arm_r=1.3, arm_c="metal", joints=False, hand="metal",
+                    neck=-31, head=head_cultist, torso=torso_cultist, held={"L": held_hook, "R": held_hook},
+                    pal=robot_pal("#121626", {},
+                                  acc=("#4b74b5", "#6a92d2", "#33528c"), metal=("#8a8f99", "#a3a8b2", "#6a6f78"),
+                                  bone=("#bcdff0", "#e4f5ff", "#8db5cc"), acc2=("#b4483a", "#d06654", "#86302a"),
+                                  dark=("#1c2030", "#262b3e", "#141724"))),
+    },
+    {
+        "id": "punch", "name": "Punch Construct", "blurb": "Beige blocky automaton with a teal visor and huge fists", "signature": "swing",
+        "bot": dict(move="legs", hip=21.5, hip_w=4, leg=(10.5, 10.5), leg_r=1.9, foot="nub", foot_w=3.8, knee_c="metal2",
+                    shoulder=(10.5, -23), arm=(8, 8), arm_r=2.6, hand_kind="fist", hand="metal2",
+                    neck=-31, neck_r=2.0, neck_c="dark", head=head_punch, torso=torso_punch,
+                    pal=robot_pal("#1a1810", dict(lamp_off="#285a5a", lamp_dim="#3fc0c0", lamp_on="#b0ffff"),
+                                  metal=("#d6c287", "#efdba5", "#a8955c"), metal2=("#a8925a", "#bea76c", "#867244"),
+                                  dark=("#4a4a52", "#5c5c66", "#36363c"))),
+    },
+    {
+        "id": "axebot", "name": "Axebot", "blurb": "Round rusty robot with an anvil head, glowing joints and an axe hand", "signature": "robot",
+        "bot": dict(move="legs", hip=16, hip_w=5, leg=(7.5, 7.5), leg_r=3.2, foot_w=5, shoulder=(11, -18), arm=(7, 6.5), arm_r=3,
+                    joint_lamp=True, hand_kind="fist", hand="metal2", neck=-27, head=head_axebot, torso=torso_axebot,
+                    held={"R": held_axe},
+                    pal=robot_pal("#170c08", dict(lamp_off="#5a2e1c", lamp_dim="#e0782a", lamp_on="#ffd070"),
+                                  metal=("#9b4a2d", "#b9643f", "#6f321f"), metal2=("#5f2b1d", "#75382a", "#451f15"),
+                                  dark=("#3f2722", "#523430", "#2c1a17"), blade=("#a8adb5", "#d8dce2", "#787e88"))),
+    },
+]
+for c in SPIRE:
+    c["kind"] = "spire"
+CATS += SPIRE
+
+
 
 # ------------------------------------------------------------------ export
 def upscale(img, k):
@@ -1559,7 +2087,7 @@ def main(only=None):
         save_indexed(sheet, os.path.join(sprites, f"{cat['id']}.png"))
         sig = cat["signature"]
         manifest["cats"].append({"id": cat["id"], "name": cat["name"], "blurb": cat["blurb"],
-                                 "kind": "robot" if cat.get("bot") else "cat",
+                                 "kind": cat.get("kind") or ("robot" if cat.get("bot") else "cat"),
                                  "signature": sig, "dance": CLIPS[sig]["name"]})
 
         # ---- previews: every clip side by side (front), and a turnaround
