@@ -1,0 +1,54 @@
+{
+  "frameWidth": 48,
+  "frameHeight": 56,
+  "animations": {
+    "dance": {
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "fps": 6
+    },
+    "idle": {
+      "frames": [
+        4,
+        5
+      ],
+      "fps": 2.5
+    }
+  },
+  "cats": [
+    {
+      "id": "biscuit",
+      "name": "Biscuit",
+      "blurb": "Classic cream with a red collar and bell",
+      "sheet": "sprites/biscuit.png"
+    },
+    {
+      "id": "smokey",
+      "name": "Smokey",
+      "blurb": "Gray tabby in red headphones",
+      "sheet": "sprites/smokey.png"
+    },
+    {
+      "id": "midnight",
+      "name": "Midnight",
+      "blurb": "Tuxedo cat in shades and a gold chain",
+      "sheet": "sprites/midnight.png"
+    },
+    {
+      "id": "pepper",
+      "name": "Pepper",
+      "blurb": "Calico with a pink bow",
+      "sheet": "sprites/pepper.png"
+    },
+    {
+      "id": "mochi",
+      "name": "Mochi",
+      "blurb": "Siamese in a blue polka-dot bandana",
+      "sheet": "sprites/mochi.png"
+    }
+  ]
+}

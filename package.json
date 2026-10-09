@@ -1,0 +1,17 @@
+{
+  "name": "gods-noisey-boyz",
+  "version": "1.0.0",
+  "description": "A private turntable.fm-style listening room for friends, powered by YouTube.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

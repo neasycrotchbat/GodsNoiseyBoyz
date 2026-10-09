@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>God's Noisey BoyZ</title>
+  <link rel="icon" href="cats/biscuit.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Door: password, name, cat -->
+  <main id="door" class="door" hidden>
+    <h1 class="sign"><span class="sign-text" data-site-name>God's Noisey BoyZ</span></h1>
+    <form id="door-form" class="door-form" autocomplete="on">
+      <label class="field">
+        <span>Password</span>
+        <input id="door-password" type="password" name="password" required autocomplete="current-password">
+      </label>
+      <label class="field">
+        <span>Username</span>
+        <input id="door-name" type="text" name="username" maxlength="20" required autocomplete="nickname" placeholder="What should we call you?">
+      </label>
+      <fieldset class="cat-pick">
+        <legend>Pick your cat</legend>
+        <div id="door-cats" class="cat-grid" role="radiogroup"></div>
+      </fieldset>
+      <p id="door-error" class="form-error" role="alert"></p>
+      <button class="btn btn-big" type="submit">Enter the room</button>
+    </form>
+  </main>
+
+  <!-- Room -->
+  <div id="room" class="room" hidden>
+    <header class="topbar">
+      <div class="sign sign-small"><span class="sign-text" data-site-name>God's Noisey BoyZ</span></div>
+      <div class="topbar-right">
+        <span id="online-count" class="online"></span>
+        <button id="me-btn" class="me-btn" type="button" aria-haspopup="true">
+          <span id="me-cat" class="cat cat-xs"></span><span id="me-name"></span>
+        </button>
+      </div>
+    </header>
+
+    <section class="stage" aria-label="Stage">
+      <div class="screen-wrap">
+        <div class="screen">
+          <div id="player"></div>
+          <div id="screen-empty" class="screen-empty">
+            <p>The decks are empty.</p>
+            <p class="muted">Add songs to your queue, then take a seat.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="booth-area">
+        <div id="spotlight" class="spotlight"></div>
+        <div id="seats" class="seats"></div>
+        <div class="booth">
+          <div id="booth-decks" class="booth-decks"></div>
+        </div>
+      </div>
+
+      <div id="crowd" class="crowd" aria-label="Listeners"></div>
+    </section>
+
+    <section class="nowbar" aria-label="Now playing">
+      <div class="np-info">
+        <div id="np-title" class="np-title">Nothing playing</div>
+        <div id="np-sub" class="np-sub"></div>
+        <div class="progress"><div id="np-progress" class="progress-fill"></div></div>
+        <div class="np-times"><span id="np-elapsed">0:00</span><span id="np-total"></span></div>
+      </div>
+      <div class="np-actions">
+        <button id="btn-awesome" class="react react-awesome" type="button" aria-pressed="false">Awesome <span id="count-awesome">0</span></button>
+        <button id="btn-lame" class="react react-lame" type="button" aria-pressed="false">Lame <span id="count-lame">0</span></button>
+        <button id="btn-snag" class="react react-snag" type="button">Snag <span id="count-snag">0</span></button>
+      </div>
+      <div class="np-dj">
+        <button id="btn-dj" class="btn" type="button">Step up to DJ</button>
+        <button id="btn-skip" class="btn btn-quiet" type="button" hidden>Skip my song</button>
+        <label class="volume">
+          <span class="sr-only">Volume</span>
+          <input id="volume" type="range" min="0" max="100" value="70">
+        </label>
+      </div>
+    </section>
+
+    <aside class="side">
+      <nav class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="chat" aria-selected="true">Chat</button>
+        <button class="tab" role="tab" data-tab="queue" aria-selected="false">My queue <span id="queue-count" class="pill"></span></button>
+        <button class="tab" role="tab" data-tab="history" aria-selected="false">Played</button>
+        <button class="tab" role="tab" data-tab="board" aria-selected="false">DJ points</button>
+      </nav>
+
+      <div class="panel" data-panel="chat">
+        <div class="chat-tools">
+          <label class="toggle"><input id="alerts" type="checkbox"> Desktop alerts for @mentions and new songs</label>
+        </div>
+        <ol id="chat-log" class="chat-log" aria-live="polite"></ol>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" type="text" maxlength="500" placeholder="Say something. Use @name to ping someone." autocomplete="off" aria-label="Chat message">
+          <button class="btn" type="submit">Send</button>
+        </form>
+      </div>
+
+      <div class="panel" data-panel="queue" hidden>
+        <form id="add-form" class="add-form">
+          <input id="add-input" type="text" placeholder="Paste a YouTube link or playlist link" aria-label="YouTube link">
+          <button class="btn" type="submit">Add</button>
+        </form>
+        <div id="add-choice" class="add-choice" hidden>
+          <span>This link is a song inside a playlist.</span>
+          <button class="btn btn-quiet" type="button" data-mode="video">Add this song</button>
+          <button class="btn btn-quiet" type="button" data-mode="playlist">Import whole playlist</button>
+        </div>
+        <form id="search-form" class="add-form" hidden>
+          <input id="search-input" type="search" placeholder="Search YouTube" aria-label="Search YouTube">
+          <button class="btn btn-quiet" type="submit">Search</button>
+        </form>
+        <p id="add-status" class="status" role="status"></p>
+        <ol id="search-results" class="songs" hidden></ol>
+        <div class="queue-tools">
+          <span id="queue-summary" class="muted"></span>
+          <span>
+            <button id="q-shuffle" class="link-btn" type="button">Shuffle</button>
+            <button id="q-clear" class="link-btn" type="button">Clear</button>
+          </span>
+        </div>
+        <ol id="queue" class="songs"></ol>
+      </div>
+
+      <div class="panel" data-panel="history" hidden>
+        <ol id="history" class="songs"></ol>
+      </div>
+
+      <div class="panel" data-panel="board" hidden>
+        <ol id="board" class="board"></ol>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Cat changer -->
+  <dialog id="me-dialog" class="dialog">
+    <form method="dialog">
+      <h2>Your cat</h2>
+      <div id="me-cats" class="cat-grid" role="radiogroup"></div>
+      <div class="dialog-actions">
+        <button id="logout" class="btn btn-quiet" type="button">Log out</button>
+        <button class="btn" value="close">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Browsers need one click before music can play -->
+  <div id="gate" class="gate" hidden>
+    <button id="gate-btn" class="btn btn-big" type="button">Join the party</button>
+    <p class="muted">Click once so your browser lets the music play.</p>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
