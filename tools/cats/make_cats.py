@@ -1156,7 +1156,35 @@ CLIPS = {
         dict(px=0, py=4, la=45, lf=290, ra=45, rf=290, lfx=-10, rfx=10, tail=0),
         dict(px=0, py=4, la=45, lf=290, ra=45, rf=290, lfx=-10, rfx=10, tail=0),
     ]},
+    # ---- DJ booth moves (the director gives these to whoever is playing)
+    "scratch": {"name": "Scratch", "kind": "dj", "frames": 16, "fps": 12, "keys": [
+        # one paw on the record working it back and forth, the other holding the headphones to the ear
+        dict(px=1, py=3, lean=3, tilt=8, hy=1, la=150, lf=215, ra=35, rf=318, lfx=-9, rfx=9, tail=8),
+        dict(px=0, py=1, lean=1, tilt=4, la=150, lf=215, ra=35, rf=348, lfx=-9, rfx=9, tail=-4, mouth="open"),
+        dict(px=1, py=3, lean=3, tilt=8, hy=1, la=150, lf=215, ra=35, rf=318, lfx=-9, rfx=9, tail=8),
+        dict(px=0, py=1, lean=1, tilt=4, la=150, lf=215, ra=35, rf=348, lfx=-9, rfx=9, tail=-4, mouth="open"),
+    ]},
+    "fistpump": {"name": "Fist pump", "kind": "dj", "frames": 16, "fps": 12, "keys": [
+        dict(px=0, py=0, lean=2, tilt=4, hy=-1, la=32, lf=330, ra=165, rf=175, lfx=-9, rfx=9, tail=10, mouth="open"),
+        dict(px=0, py=4, lean=1, tilt=0, hy=1, la=32, lf=330, ra=115, rf=95, lfx=-9, rfx=9, tail=-6),
+        dict(px=0, py=0, lean=2, tilt=4, hy=-1, la=32, lf=330, ra=165, rf=175, lfx=-9, rfx=9, tail=10, mouth="open"),
+        dict(px=0, py=4, lean=1, tilt=0, hy=1, la=32, lf=330, ra=115, rf=95, lfx=-9, rfx=9, tail=-6),
+    ]},
+    "handsup": {"name": "Hands up", "kind": "dj", "frames": 16, "fps": 12, "keys": [
+        # a slow build to the top of the bar, then the loop snaps back down: the drop
+        dict(px=0, py=4, la=40, lf=20, ra=40, rf=20, lfx=-10, rfx=10, tail=0),
+        dict(px=0, py=2, la=100, lf=140, ra=100, rf=140, lfx=-10, rfx=10, tail=6),
+        dict(px=0, py=0, hy=-1, la=140, lf=160, ra=140, rf=160, lfx=-10, rfx=10, tail=12, mouth="open"),
+        dict(px=0, py=-1, hy=-1, la=150, lf=168, ra=150, rf=168, lfx=-10, rfx=10, tail=16, mouth="open", eyes="open"),
+    ]},
     # ---- reactions
+    "boo": {"name": "Boo", "kind": "react", "frames": 8, "fps": 10, "keys": [
+        # thumbs down, shaking the head
+        dict(px=-1, py=2, lean=-3, tilt=-12, la=82, lf=4, ra=82, rf=4, tail=-6, eyes="open", mouth="open"),
+        dict(px=0, py=3, tilt=0, la=88, lf=12, ra=88, rf=12, tail=0, eyes="open"),
+        dict(px=1, py=2, lean=3, tilt=12, la=82, lf=4, ra=82, rf=4, tail=6, eyes="open", mouth="open"),
+        dict(px=0, py=3, tilt=0, la=88, lf=12, ra=88, rf=12, tail=0, eyes="open"),
+    ]},
     "cheer": {"name": "Cheer", "kind": "react", "frames": 8, "fps": 12, "keys": [
         dict(px=0, py=-1, la=140, lf=150, ra=140, rf=150, lfx=-9, rfx=9, tail=-10, mouth="open"),
         dict(px=-1, py=2, lean=-3, la=150, lf=185, ra=130, rf=140, lfx=-9, rfx=9, rlift=2, tail=0, mouth="open"),
@@ -1236,7 +1264,7 @@ def clip_poses(clip):
     n = len(poses)
     for i, p in enumerate(poses):
         ph = i / n
-        if clip["kind"] == "move":      # a beat every 4 frames, two tail swings a loop
+        if clip["kind"] in ("move", "dj"):  # a beat every 4 frames, two tail swings a loop
             p["swing"] = 30 * math.sin(2 * math.pi * 2 * ph)
             p["glow"] = max(0.0, 1 - (i % 4) / 2.5)
             p["ext"] = 0.5 - 0.5 * math.cos(2 * math.pi * 2 * ph)

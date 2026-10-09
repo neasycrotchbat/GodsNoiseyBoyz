@@ -31,6 +31,8 @@ That quick link changes every time you run `share.bat`. For a link that never ch
 - **DJing:** take an open seat at the booth. DJs take turns, one song each. The song you play is marked **Played** and moves to the bottom of your queue; only unplayed songs come up on your turns. When you've played everything, you leave the decks automatically. Add songs, load a playlist, or press **Replay all** to go again.
 - **Voting:** Awesome makes your cat dance and gives the DJ a point. If enough people vote Lame (at least 2, and at least half the room), the song gets skipped.
 - **Snag:** copies the current song into your own queue.
+- **Beat sync:** press **Tap the beat** (or the **T** key) in time with the music, at least 4 times. The whole room's dancers lock onto that tempo, and it's remembered for that song, so it stays in sync every time the song plays. With a GetSongBPM key (below), songs get a looked-up tempo automatically and a tap just lines it up with the beat. The dot next to the button pulses on the beat so you can check it.
+- **Emotes:** the Emote buttons under the controls make your avatar do a move or a reaction for everyone to see (Cheer, Jump, Clap, Disco, Robot, Hands up, Twist, Raise the roof, Boo).
 - **Alerts:** tick "Desktop alerts" in Chat to get a notification when someone @mentions you or a new song starts while the tab is in the background.
 
 ## Optional: YouTube API key (playlist import and search)
@@ -54,6 +56,11 @@ The free quota covers about 100 searches a day plus thousands of song lookups, w
 | `maxDjs` | DJ seats at the booth, default 5. |
 | `lameSkipFraction` | Share of listeners whose Lame votes skip a song, default 0.5. |
 | `crowd` | NPC cats on the dance floor, default 24 (0 turns them off, 40 max). Narrow screens show fewer. |
+| `bpmApiKey` | Optional GetSongBPM key for automatic song tempos, see below. |
+
+## Optional: GetSongBPM key (automatic tempos)
+
+Tapping works on its own. To have each song's tempo looked up automatically, get a free key at https://getsongbpm.com/api (register with an email address), paste it into `config.json` as `"bpmApiKey": "your-key-here"`, and restart. GetSongBPM requires a link back to their site wherever their data is used; the room shows "via GetSongBPM" next to looked-up tempos, which covers that. Lookups match on the song's title and artist, so obscure tracks and remixes may not be found; tapping fills those in.
 
 Restart `start.bat` after changing settings.
 
@@ -73,7 +80,9 @@ Press `Win + R`, type `shell:startup`, and press Enter. Right-click in that fold
 
 Each cat is a sprite atlas in `public/cats/`: 64×88 frames, 32 to a row, with one block of rows per view (front, side, back). Every avatar has the same clips: ten dance moves (Swing step, Side shuffle, Knee-up groove, Elbow bounce, Party stomp, The twist, Disco point, Raise the roof, Hands in the air, The robot), reactions (cheer, jump, clap) and resting loops (head bob, idle). `public/cats/cats.json` lists where each clip starts and how fast it plays.
 
-`public/dance.js` is the dance director. While a song plays, the DJ and anyone who voted Awesome string moves together, switching every few seconds, turning to the side or back, and sometimes spinning. Everyone else bobs along, and between songs they idle and look around. The whole room jumps and cheers when a new song starts and claps when the music stops. The choices come from the song's start time and each person's ID, so every friend sees the same dancing. Each cat favours its signature move. Changing moves is tweened: every clip has a few eased frames out to a shared "ready" stance and back in, so a cat settles out of one move, turns there if it's changing direction, and eases into the next.
+`public/dance.js` is the dance director. While a song plays, anyone who voted Awesome strings moves together, turning to the side or back and sometimes spinning; the DJ works the booth (scratching, fist pumps, hands up) with the odd dance move. Everyone else bobs along, Lame voters boo and turn their backs on the stage, and between songs everyone idles and looks around. The whole room jumps and cheers when a new song starts and claps when the music stops.
+
+When the song's tempo is known, everything locks to the beat: each move loop is one bar (half or double time for very fast or slow songs), moves change on 2- and 4-bar phrases, the whole crowd hits the same move every 8th bar, and a wave ripples across the floor every 16 bars. Dancers follow the song as your own player hears it, so they stay on the beat even if your video runs slightly behind someone else's. The choices come from the song's start time and each person's ID, so every friend sees the same dancing. Each cat favours its signature move. Changing moves is tweened: every clip has a few eased frames out to a shared "ready" stance and back in, so a cat settles out of one move, turns there if it's changing direction, and eases into the next.
 
 There are sixteen avatars to pick from.
 
@@ -89,3 +98,8 @@ Robots are drawn on the same skeleton as the cats (`draw_robot` in `make_cats.py
 ## Regenerating the cat art
 
 The cats are drawn by `tools/cats/make_cats.py` (needs Python 3 and Pillow: `pip install pillow`). Moves are keyframes on a shared skeleton, written as seen from the front; the script draws them from all three views, so a new move works for every cat. Run it (about 40 seconds), and it writes atlases, `cats.json`, GIF previews (`gifs/<cat>_moves.gif`, `gifs/<cat>_turn.gif`) and a lineup into `tools/cats/out/`. Copy `tools/cats/out/sprites/*.png` and `tools/cats/out/cats.json` into `public/cats/` to use them in the room. Pass cat ids (`python tools/cats/make_cats.py biscuit`) to redraw just those for a quick preview.
+
+## Credits
+
+Song tempos are provided by [GetSongBPM](https://getsongbpm.com).
+

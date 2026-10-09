@@ -40,19 +40,23 @@
   // Atlases and clips are described by cats/cats.json; dance.js picks the frames.
   // mode: dance | groove | chill | still. seed: whose dance sequence (user id).
   // anchor: server time the sequence starts from (the current song's start).
-  function catNode(catId, { size = 'md', mode = 'still', seed, anchor = 0, face } = {}) {
+  // opts: mode, seed, anchor, face, x (see dance.js). Song-synced avatars get
+  // the current song's beat automatically.
+  function catNode(catId, { size = 'md', ...opts } = {}) {
     const n = el('span', 'cat cat-' + size);
-    setCat(n, catId, { mode, seed, anchor, face });
+    setCat(n, catId, opts);
     return n;
   }
-  function setCat(n, catId, { mode = 'still', seed, anchor = 0, face } = {}) {
+  function setCat(n, catId, { mode = 'still', seed, anchor = 0, face, x } = {}) {
     lazySkin(n, catId);
     n.setAttribute('role', 'img');
     const cat = CATS.find((c) => c.id === catId);
     n.setAttribute('aria-label', cat ? cat.name : 'cat');
-    Dance.attach(n, { skin: catId, mode, seed, anchor, face });
+    const beat = anchor && room && room.current && room.current.beat;
+    Dance.attach(n, { skin: catId, mode, seed, anchor, face, x, bpm: beat && beat.bpm, offset: beat ? beat.offset : null });
   }
-  const SPRITE_VERSION = 6;
+  const SPRITE_VERSION = 7;
+  let SPRITE_CLIPS = {};
 
   // Sprite sheets are big (~240KB each), so a skin downloads only once
   // something wearing it comes on screen. After that it's cached, and new
@@ -133,7 +137,8 @@
     CATS = info.cats;
     npcs = makeNpcs(info.crowd || 0);
     Dance.init(info.sprites);
-    Dance.now = serverNow; // everyone's dancing runs on the server's clock
+    SPRITE_CLIPS = info.sprites.clips;
+    Dance.now = () => songClock(); // dancing runs on the song as this player hears it
     hasApiKey = info.hasApiKey;
     document.title = info.siteName;
     for (const n of document.querySelectorAll('[data-site-name]')) n.textContent = info.siteName;
@@ -232,6 +237,10 @@
     socket.on('history', (h) => { history = h; renderHistory(); });
     socket.on('playlists', (list) => { playlists = list; renderPlaylists(); });
     socket.on('chat', (m) => addChat(m, true));
+    socket.on('emote', ({ userId, clip } = {}) => {
+      const isMove = SPRITE_CLIPS[clip] && SPRITE_CLIPS[clip].kind === 'move';
+      Dance.react(userId, clip, barMs() * (isMove ? 2 : 1));
+    });
   }
 
   function syncClock() {
@@ -253,11 +262,13 @@
   // Reactions: the whole room cheers or jumps when a new song drops, claps when
   // the music stops, and a cat cheers the moment its owner votes Awesome.
   let prevAwesomes = new Set();
+  let prevLames = new Set();
   function roomReactions(prevKey, prevRoom, r) {
     const c = r.current;
     const everyone = [...new Set([...r.listeners, ...r.djs, ...npcs.map((n) => n.id)])];
     if (prevKey === undefined) { // just arrived: take the room as it is, no fanfare
       prevAwesomes = new Set(c ? c.awesomes : []);
+      prevLames = new Set(c ? c.lames : []);
       return;
     }
     if (lastSongKey !== prevKey) {
@@ -267,10 +278,15 @@
         else if (prevKey) Dance.react(id, 'clap', 2400, rand() * 300);
       }
       prevAwesomes = new Set();
+      prevLames = new Set();
     }
     const now = new Set(c ? c.awesomes : []);
     for (const id of now) if (!prevAwesomes.has(id)) Dance.react(id, 'cheer', 1300);
     prevAwesomes = now;
+    // A Lame vote: thumbs down and a head shake, then they turn their back on the stage.
+    const boos = new Set(c ? c.lames : []);
+    for (const id of boos) if (!prevLames.has(id)) Dance.react(id, 'boo', 1800);
+    prevLames = boos;
     for (const id of c ? c.snags : []) {
       if (prevRoom && prevRoom.current && !prevRoom.current.snags.includes(id)) Dance.react(id, 'jump', 1000);
     }
@@ -282,7 +298,9 @@
     room = r;
     const c = r.current;
     lastSongKey = c ? c.song.videoId + ':' + c.startedAt : null;
+    if (lastSongKey !== prevKey) { videoDrift = 0; taps = []; }
     roomReactions(prevKey, prevRoom, r);
+    renderBeat();
     if (c && lastSongKey !== prevKey && prevKey !== undefined && notifyOk() && c.djId !== me.id) {
       notify(`Now playing: ${c.song.title}`, `${userName(c.djId)} is on the decks`);
     }
@@ -315,7 +333,7 @@
         if (playing) { spotIndex = i; deck.classList.add('spinning'); }
         seat.append(
           el('span', 'nametag', userName(djId) + (djId === me.id ? ' (you)' : '')),
-          catNode(userCat(djId), { size: 'dj', mode: playing ? 'dance' : c ? 'groove' : 'chill', seed: djId, anchor: c ? c.startedAt : 0 }),
+          catNode(userCat(djId), { size: 'dj', mode: playing ? 'dj' : c ? 'groove' : 'chill', seed: djId, anchor: c ? c.startedAt : 0 }),
         );
       } else {
         const inSeat = room.djs.includes(me.id);
@@ -383,7 +401,9 @@
         // Each row is shifted a little so heads line up in the gaps of the row in front.
         const shift = row === 1 ? 0.25 : row === 0 ? -0.25 : 0;
         const jitter = m.npc ? m.npc.jitter : (((hash(m.id) >>> 5) % 7) - 3) * 0.6;
-        fan.style.left = `${3 + (94 * (i + 0.5 + shift)) / members.length + jitter}%`;
+        const left = 3 + (94 * (i + 0.5 + shift)) / members.length + jitter;
+        fan.style.left = `${left}%`;
+        const x = Math.max(0, Math.min(1, left / 100)); // for the crowd wave
         // People carry a name tag above their head; lift them so heads line up.
         fan.style.top = `calc(${CROWD_ROWS[row].top}px * var(--k) - ${m.npc ? 0 : 16}px)`;
         fan.style.zIndex = String(row * 10 + (m.npc ? 0 : 5));
@@ -393,15 +413,16 @@
           fan.style.setProperty('--tint', m.npc.tint + 'deg');
           const keen = c ? Dance.seedRand(m.id + c.startedAt)() : 1;
           const mode = !c ? 'chill' : keen < hype ? 'dance' : 'groove';
-          fan.append(catNode(m.npc.skin, { mode, seed: m.id, anchor, face: 'stage' }));
+          fan.append(catNode(m.npc.skin, { mode, seed: m.id, anchor, face: 'stage', x }));
         } else {
-          // Awesome voters dance; everyone else grooves along, or chills between songs.
+          // Awesome voters dance, Lame voters sulk with their backs to the stage,
+          // everyone else grooves along (or chills between songs).
           const id = m.id;
-          const mode = awesomes.has(id) ? 'dance' : c ? 'groove' : 'chill';
+          const mode = awesomes.has(id) ? 'dance' : lames.has(id) ? 'sulk' : c ? 'groove' : 'chill';
           const tag = el('span', 'nametag' + (id === me.id ? ' me' : ''), userName(id) + (id === me.id ? ' (you)' : ''));
           // Alternate people's name heights so neighbours' tags don't collide.
           if (people++ % 2) fan.classList.add('lift');
-          fan.append(tag, catNode(userCat(id), { mode, seed: id, anchor, face: 'stage' }));
+          fan.append(tag, catNode(userCat(id), { mode, seed: id, anchor, face: 'stage', x }));
           let bubble = null;
           if (snags.has(id)) bubble = ['Snag', 'bubble-snag'];
           else if (awesomes.has(id)) bubble = ['Awesome', 'bubble-awesome'];
@@ -538,9 +559,104 @@
     } else if (state === YT.PlayerState.PLAYING) {
       const drift = player.getCurrentTime() - pos;
       if (Math.abs(drift) > 1 && (!c.duration || pos < c.duration - 1)) player.seekTo(pos, true);
+      else trackDrift(drift * 1000);
     }
   }
   setInterval(syncPlayer, 1000);
+
+  // The song clock: how far this player's video runs ahead of (or behind) the
+  // room's timeline. Dancers and beat taps use it, so they match what you hear.
+  let videoDrift = 0;
+  function trackDrift(ms) {
+    if (Math.abs(ms) > 1500) return;
+    videoDrift = videoDrift * 0.6 + ms * 0.4;
+  }
+  const songClock = () => serverNow() + (room && room.current ? videoDrift : 0);
+  // Where the song is right now on this player, in ms (the song clock, so it
+  // has millisecond resolution and matches what the dancers follow).
+  const songPosition = () => (room && room.current ? songClock() - room.current.startedAt : null);
+
+  // ---- beat sync: tap along (button or T); after 4 taps the room locks on.
+  let taps = [];
+  let tapNote = '';
+  function tapBeat() {
+    const c = room && room.current;
+    if (!c) { tapNote = 'Nothing is playing'; renderBeat(); return; }
+    const at = performance.now();
+    if (taps.length && at - taps[taps.length - 1].at > 2200) taps = [];
+    taps.push({ at, pos: songPosition() });
+    if (taps.length > 16) taps.shift();
+    const dot = $('#beat-dot');
+    dot.classList.add('tap');
+    setTimeout(() => dot.classList.remove('tap'), 90);
+    if (taps.length < 4) {
+      tapNote = `Keep tapping… ${4 - taps.length}`;
+      renderBeat();
+      return;
+    }
+    tapNote = 'Keep tapping to fine-tune';
+    renderBeat();
+    if (taps.length % 2) return; // send every other tap; each send refines the beat
+    // Spacing comes from the precise local timer; the song clock only places
+    // the taps in the song, averaged over all of them to smooth out its nudges.
+    const t0 = taps[0].at;
+    const base = taps.reduce((s, t) => s + (t.pos - (t.at - t0)), 0) / taps.length;
+    const positions = taps.map((t) => Math.round(base + (t.at - t0)));
+    socket.emit('beat:tap', { videoId: c.song.videoId, positions }, (res) => {
+      tapNote = res && res.error ? res.error : '';
+      renderBeat();
+    });
+  }
+  $('#beat-tap').addEventListener('click', tapBeat);
+  document.addEventListener('keydown', (e) => {
+    const typing = e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
+    if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
+      e.preventDefault();
+      tapBeat();
+    }
+  });
+  function renderBeat() {
+    const c = room && room.current;
+    const b = c && c.beat;
+    $('#beat-label').textContent = tapNote || (b ? `${Math.round(b.bpm)} BPM` : c ? 'Tap the beat' : 'Beat');
+    const src = $('#beat-src');
+    src.replaceChildren();
+    if (!b || tapNote) return;
+    if (b.source === 'tap') src.textContent = 'tapped in';
+    else {
+      // GetSongBPM asks for a link back whenever their data is shown.
+      const a = el('a', '', 'via GetSongBPM');
+      a.href = 'https://getsongbpm.com';
+      a.target = '_blank';
+      a.rel = 'noopener';
+      src.append(a, document.createTextNode(b.offset == null ? ' · tap to line it up' : ''));
+    }
+  }
+  // The dot pulses on each beat while a tempo is known.
+  (function pulse() {
+    const c = room && room.current;
+    const b = c && c.beat;
+    const dot = $('#beat-dot');
+    if (b && b.bpm > 0) {
+      const beatMs = 60000 / b.bpm;
+      const since = songClock() - c.startedAt - (b.offset || 0);
+      dot.classList.toggle('on', ((since % beatMs) + beatMs) % beatMs < beatMs * 0.18);
+    } else dot.classList.remove('on');
+    requestAnimationFrame(pulse);
+  })();
+
+  // ---- emotes: your avatar does a move (two bars) or a reaction (one bar) for everyone
+  function barMs() {
+    const b = room && room.current && room.current.beat;
+    if (!b || !(b.bpm > 0)) return 1600;
+    let bar = (4 * 60000) / b.bpm;
+    while (bar < 1200) bar *= 2;
+    while (bar > 2700) bar /= 2;
+    return bar;
+  }
+  for (const b of document.querySelectorAll('[data-emote]')) {
+    b.addEventListener('click', () => socket && socket.emit('emote', b.dataset.emote));
+  }
 
   function onPlayerState(e) {
     const c = room && room.current;

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
   <!-- Door: password, name, cat -->
@@ -75,6 +75,12 @@
         <div id="np-sub" class="np-sub"></div>
         <div class="progress"><div id="np-progress" class="progress-fill"></div></div>
         <div class="np-times"><span id="np-elapsed">0:00</span><span id="np-total"></span></div>
+        <div class="beatbar">
+          <button id="beat-tap" class="beat-tap" type="button" title="Tap along to the beat (or press T) so the dancers move in time">
+            <span id="beat-dot" class="beat-dot" aria-hidden="true"></span><span id="beat-label">Tap the beat</span>
+          </button>
+          <span id="beat-src" class="beat-src"></span>
+        </div>
       </div>
       <div class="np-actions">
         <button id="btn-awesome" class="react react-awesome" type="button" aria-pressed="false">Awesome <span id="count-awesome">0</span></button>
@@ -89,6 +95,18 @@
           <span class="sr-only">Volume</span>
           <input id="volume" type="range" min="0" max="100" value="70">
         </label>
+      </div>
+      <div class="emotes" role="group" aria-label="Emotes: make your avatar do a move">
+        <span class="emotes-label">Emote</span>
+        <button type="button" data-emote="cheer">Cheer</button>
+        <button type="button" data-emote="jump">Jump</button>
+        <button type="button" data-emote="clap">Clap</button>
+        <button type="button" data-emote="disco">Disco</button>
+        <button type="button" data-emote="robot">Robot</button>
+        <button type="button" data-emote="wave">Hands up</button>
+        <button type="button" data-emote="twist">Twist</button>
+        <button type="button" data-emote="roof">Raise the roof</button>
+        <button type="button" data-emote="boo">Boo</button>
       </div>
     </section>
 
@@ -205,7 +223,7 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="dance.js?v=12"></script>
-  <script src="app.js?v=12"></script>
+  <script src="dance.js?v=13"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

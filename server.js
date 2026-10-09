@@ -18,7 +18,7 @@ const CONFIG_PATH = path.join(ROOT, 'config.json');
 if (!fs.existsSync(CONFIG_PATH)) fs.copyFileSync(path.join(ROOT, 'config.example.json'), CONFIG_PATH);
 const config = {
   siteName: "God's Noisey BoyZ", password: 'changeme', port: 3000,
-  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5, crowd: 24,
+  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5, crowd: 24, bpmApiKey: '',
   ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')),
 };
 const PORT = Number(process.env.PORT) || config.port;
@@ -32,7 +32,8 @@ const CAT_IDS = new Set(CATS.cats.map((c) => c.id));
 
 // ------------------------------------------------------------------ storage
 const DB_PATH = path.join(DATA_DIR, 'db.json');
-const db = { users: {}, queues: {}, history: [], chat: [], playlists: [] };
+// tempos: videoId -> { bpm, offset (ms from the song's start to a beat, or null), source, at }
+const db = { users: {}, queues: {}, history: [], chat: [], playlists: [], tempos: {} };
 if (fs.existsSync(DB_PATH)) {
   try { Object.assign(db, JSON.parse(fs.readFileSync(DB_PATH, 'utf8'))); } catch (e) {
     console.error('Could not read data/db.json, starting fresh:', e.message);
@@ -214,8 +215,86 @@ function roomPayload() {
       awesomes: [...c.votes].filter(([, v]) => v > 0).map(([k]) => k),
       lames: [...c.votes].filter(([, v]) => v < 0).map(([k]) => k),
       snags: [...c.snags],
+      beat: c.beat || null,
     },
   };
+}
+
+// ------------------------------------------------------------------ tempo
+// Each song's beat is stored by video: bpm plus, once someone has tapped
+// along, the offset (ms into the song) of a beat. Offsets are in song time,
+// the position in the video, so they hold every time the song plays.
+function beatFor(song) {
+  const t = db.tempos[song.videoId];
+  if (!t || !t.bpm) return null;
+  return { bpm: t.bpm, offset: t.offset ?? null, source: t.source };
+}
+
+// "Artist - Title (Official Video)" -> { artist, title } for the BPM lookup.
+function songQuery(song) {
+  let title = String(song.title || '');
+  let artist = String(song.channel || '').replace(/\s*-\s*Topic$/i, '').replace(/VEVO$/i, '').trim();
+  const dash = title.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (dash) { artist = dash[1]; title = dash[2]; }
+  title = title.replace(/[([][^)\]]*[)\]]/g, '').replace(/\b(ft\.?|feat\.?|featuring)\s.*$/i, '').replace(/["“”]/g, '').trim();
+  artist = artist.replace(/\s*(,|&|\bx\b|ft\.?|feat\.?).*$/i, '').trim();
+  return { title, artist };
+}
+
+// GetSongBPM (free key, https://getsongbpm.com/api). Their docs list two hosts; try both.
+const BPM_HOSTS = ['https://api.getsong.co', 'https://api.getsongbpm.com'];
+async function fetchBpm(title, artist, key) {
+  const get = async (url) => {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'X-API-KEY': key } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  };
+  const fit = (n) => (n >= 40 && n <= 250 ? n : null);
+  for (const host of BPM_HOSTS) {
+    try {
+      const k = encodeURIComponent(key);
+      const tries = artist ? [['both', `song:${title} artist:${artist}`], ['song', title]] : [['song', title]];
+      for (const [type, lookup] of tries) {
+        const data = await get(`${host}/search/?api_key=${k}&type=${type}&lookup=${encodeURIComponent(lookup)}`);
+        const hits = Array.isArray(data.search) ? data.search : [];
+        for (const hit of hits.slice(0, 5)) {
+          let bpm = fit(Number(hit.tempo));
+          if (!bpm && hit.id) {
+            const song = await get(`${host}/song/?api_key=${k}&id=${encodeURIComponent(hit.id)}`);
+            bpm = fit(Number(song.song && song.song.tempo));
+          }
+          if (bpm) return bpm;
+        }
+      }
+      return null; // the service answered; it just doesn't know this song
+    } catch (e) {
+      console.error(`BPM lookup via ${host} failed:`, e.message);
+    }
+  }
+  return null;
+}
+
+const lookingUp = new Set();
+async function lookupTempo(song) {
+  const known = db.tempos[song.videoId];
+  if (!config.bpmApiKey || lookingUp.has(song.videoId)) return;
+  if (known && (known.bpm || Date.now() - known.at < 7 * 864e5)) return; // misses retry after a week
+  lookingUp.add(song.videoId);
+  try {
+    const { title, artist } = songQuery(song);
+    if (!title) return;
+    const bpm = await fetchBpm(title, artist, config.bpmApiKey);
+    if (db.tempos[song.videoId] && db.tempos[song.videoId].source === 'tap') return; // a tap beat us to it
+    db.tempos[song.videoId] = bpm ? { bpm, offset: null, source: 'lookup', at: Date.now() } : { bpm: null, at: Date.now() };
+    save();
+    const c = room.current;
+    if (bpm && c && c.song.videoId === song.videoId && !c.beat) {
+      c.beat = beatFor(song);
+      pushRoom();
+    }
+  } finally {
+    lookingUp.delete(song.videoId);
+  }
 }
 const pushRoom = () => io.emit('room', roomPayload());
 const pushUsers = () => io.emit('users', Object.values(db.users).map(publicUser));
@@ -284,7 +363,9 @@ function playNext() {
     room.current = {
       song, djId, startedAt: Date.now() + LEAD_MS,
       duration: song.duration || 0, votes: new Map(), snags: new Set(),
+      beat: beatFor(song),
     };
+    lookupTempo(song).catch((e) => console.error('BPM lookup:', e.message));
     scheduleEnd();
     pushRoom();
     save();
@@ -374,6 +455,40 @@ io.on('connection', (socket) => {
   };
 
   socket.on('clock', (ack) => reply(ack, Date.now()));
+
+  // ---- beat: someone taps along; positions are ms into the song on their player
+  socket.on('beat:tap', ({ videoId, positions } = {}, ack) => {
+    const c = room.current;
+    if (!c || c.song.videoId !== videoId) return reply(ack, { error: 'That song already ended.' });
+    if (!rateLimit(socket, 'tapRate', 4, 4000)) return reply(ack, { error: 'Slow down a little.' });
+    const t = (Array.isArray(positions) ? positions : []).map(Number).filter(Number.isFinite).slice(-16);
+    if (t.length < 4 || t.some((x, i) => i && x <= t[i - 1])) return reply(ack, { error: 'Tap at least 4 times in a row.' });
+    // Fit a straight line through the taps: position = a + i * beatMs.
+    const n = t.length;
+    const mi = (n - 1) / 2;
+    const mt = t.reduce((s, x) => s + x, 0) / n;
+    let num = 0;
+    let den = 0;
+    t.forEach((x, i) => { num += (i - mi) * (x - mt); den += (i - mi) ** 2; });
+    const beatMs = num / den;
+    const a = mt - beatMs * mi;
+    if (!(beatMs >= 240 && beatMs <= 1500)) return reply(ack, { error: "That's too fast or too slow to be the beat." });
+    if (t.some((x, i) => Math.abs(x - (a + beatMs * i)) > beatMs * 0.3)) return reply(ack, { error: 'Those taps were a bit uneven. Try again.' });
+    const bpm = Math.round(6000000 / beatMs) / 100;
+    const offset = Math.round((((a % beatMs) + beatMs) % beatMs));
+    db.tempos[videoId] = { bpm, offset, source: 'tap', at: Date.now(), by: uid };
+    c.beat = beatFor(c.song);
+    save();
+    pushRoom();
+    reply(ack, { bpm });
+  });
+
+  // ---- emotes: make your avatar do a move or a reaction for everyone to see
+  const EMOTES = new Set(['cheer', 'jump', 'clap', 'disco', 'robot', 'wave', 'twist', 'roof', 'boo']);
+  socket.on('emote', (clip) => {
+    if (!EMOTES.has(clip) || !rateLimit(socket, 'emoteRate', 3, 4000)) return;
+    io.emit('emote', { userId: uid, clip });
+  });
 
   // ---- chat
   socket.on('chat', (text) => {

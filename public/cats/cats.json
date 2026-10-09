@@ -2,12 +2,12 @@
   "frameWidth": 64,
   "frameHeight": 88,
   "cols": 32,
-  "rows": 27,
+  "rows": 33,
   "tweenFps": 12,
   "views": {
     "front": 0,
-    "side": 9,
-    "back": 18
+    "side": 11,
+    "back": 22
   },
   "clips": {
     "swing": {
@@ -17,11 +17,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 200,
+        "start": 256,
         "count": 2
       },
       "in": {
-        "start": 202,
+        "start": 258,
         "count": 3
       }
     },
@@ -32,11 +32,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 205,
+        "start": 261,
         "count": 2
       },
       "in": {
-        "start": 207,
+        "start": 263,
         "count": 3
       }
     },
@@ -47,11 +47,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 210,
+        "start": 266,
         "count": 2
       },
       "in": {
-        "start": 212,
+        "start": 268,
         "count": 3
       }
     },
@@ -62,11 +62,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 215,
+        "start": 271,
         "count": 2
       },
       "in": {
-        "start": 217,
+        "start": 273,
         "count": 3
       }
     },
@@ -77,11 +77,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 220,
+        "start": 276,
         "count": 2
       },
       "in": {
-        "start": 222,
+        "start": 278,
         "count": 3
       }
     },
@@ -92,11 +92,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 225,
+        "start": 281,
         "count": 2
       },
       "in": {
-        "start": 227,
+        "start": 283,
         "count": 3
       }
     },
@@ -107,11 +107,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 230,
+        "start": 286,
         "count": 2
       },
       "in": {
-        "start": 232,
+        "start": 288,
         "count": 3
       }
     },
@@ -122,11 +122,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 235,
+        "start": 291,
         "count": 2
       },
       "in": {
-        "start": 237,
+        "start": 293,
         "count": 3
       }
     },
@@ -137,11 +137,11 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 240,
+        "start": 296,
         "count": 2
       },
       "in": {
-        "start": 242,
+        "start": 298,
         "count": 3
       }
     },
@@ -152,86 +152,146 @@
       "count": 16,
       "fps": 12,
       "out": {
-        "start": 245,
+        "start": 301,
         "count": 2
       },
       "in": {
-        "start": 247,
+        "start": 303,
+        "count": 3
+      }
+    },
+    "scratch": {
+      "name": "Scratch",
+      "kind": "dj",
+      "start": 160,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 306,
+        "count": 2
+      },
+      "in": {
+        "start": 308,
+        "count": 3
+      }
+    },
+    "fistpump": {
+      "name": "Fist pump",
+      "kind": "dj",
+      "start": 176,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 311,
+        "count": 2
+      },
+      "in": {
+        "start": 313,
+        "count": 3
+      }
+    },
+    "handsup": {
+      "name": "Hands up",
+      "kind": "dj",
+      "start": 192,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 316,
+        "count": 2
+      },
+      "in": {
+        "start": 318,
+        "count": 3
+      }
+    },
+    "boo": {
+      "name": "Boo",
+      "kind": "react",
+      "start": 208,
+      "count": 8,
+      "fps": 10,
+      "out": {
+        "start": 321,
+        "count": 2
+      },
+      "in": {
+        "start": 323,
         "count": 3
       }
     },
     "cheer": {
       "name": "Cheer",
       "kind": "react",
-      "start": 160,
+      "start": 216,
       "count": 8,
       "fps": 12,
       "out": {
-        "start": 250,
+        "start": 326,
         "count": 2
       },
       "in": {
-        "start": 252,
+        "start": 328,
         "count": 3
       }
     },
     "jump": {
       "name": "Jump",
       "kind": "react",
-      "start": 168,
+      "start": 224,
       "count": 8,
       "fps": 12,
       "out": {
-        "start": 255,
+        "start": 331,
         "count": 2
       },
       "in": {
-        "start": 257,
+        "start": 333,
         "count": 3
       }
     },
     "clap": {
       "name": "Clap",
       "kind": "react",
-      "start": 176,
+      "start": 232,
       "count": 8,
       "fps": 10,
       "out": {
-        "start": 260,
+        "start": 336,
         "count": 2
       },
       "in": {
-        "start": 262,
+        "start": 338,
         "count": 3
       }
     },
     "bob": {
       "name": "Head bob",
       "kind": "rest",
-      "start": 184,
+      "start": 240,
       "count": 8,
       "fps": 8,
       "out": {
-        "start": 265,
+        "start": 341,
         "count": 2
       },
       "in": {
-        "start": 267,
+        "start": 343,
         "count": 3
       }
     },
     "idle": {
       "name": "Idle",
       "kind": "rest",
-      "start": 192,
+      "start": 248,
       "count": 8,
       "fps": 5,
       "out": {
-        "start": 270,
+        "start": 346,
         "count": 2
       },
       "in": {
-        "start": 272,
+        "start": 348,
         "count": 3
       }
     }

@@ -335,6 +335,32 @@ input:focus { border-color: var(--focus); outline: none; }
 .react:disabled { opacity: 0.35; cursor: not-allowed; }
 .volume input { width: 100px; accent-color: var(--amber); }
 
+/* Beat sync: tap along, and a dot that pulses on the beat */
+.beatbar { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem; font-size: 0.8rem; color: var(--muted); }
+.beat-tap {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font: 600 0.8rem var(--display); color: var(--text);
+  background: #120e1d; border: 1px solid var(--line); border-radius: 999px;
+  padding: 0.2rem 0.6rem 0.2rem 0.35rem; cursor: pointer;
+}
+.beat-tap:hover { border-color: var(--amber); }
+.beat-tap:active { transform: translateY(1px); }
+.beat-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); transition: background 60ms, box-shadow 60ms; }
+.beat-dot.on { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+.beat-dot.tap { background: var(--neon); box-shadow: 0 0 8px var(--neon); }
+.beat-src a { color: var(--muted); }
+
+/* Emotes: make your avatar do something for everyone to see */
+.emotes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.emotes-label { font: 600 0.8rem var(--display); color: var(--muted); margin-right: 0.2rem; }
+.emotes button {
+  font: 600 0.78rem var(--display); color: var(--text);
+  background: #120e1d; border: 1px solid var(--line); border-radius: 999px;
+  padding: 0.25rem 0.6rem; cursor: pointer;
+}
+.emotes button:hover { border-color: var(--amber); color: var(--amber); }
+.emotes button[data-emote="boo"]:hover { border-color: var(--lame); color: var(--lame); }
+
 /* ---------------- sidebar */
 .side {
   grid-area: side;
