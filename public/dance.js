@@ -11,6 +11,7 @@
  *   data-mode    dance | groove | chill | still
  *   data-seed    who this is (user id); picks their personal sequence
  *   data-anchor  server time the sequence starts from (the song's start), or 0
+ *   data-face    "stage" for crowd cats seen from behind (they face the DJ)
  */
 (() => {
   'use strict';
@@ -114,7 +115,11 @@
     const c = M.clips[clip];
     showIdx(n, c.start + (frame % c.count), view, flip);
   }
+  // A crowd faces the stage, so "facing out" is the back view and turning to
+  // look at you is the front view.
+  const TOWARD_STAGE = { front: 'back', back: 'front', side: 'side' };
   function showIdx(n, idx, view, flip) {
+    if (n.dataset.face === 'stage') view = TOWARD_STAGE[view];
     const col = idx % M.cols;
     const row = M.views[view] + Math.floor(idx / M.cols);
     n.style.backgroundPosition = `${(col / (M.cols - 1)) * 100}% ${(row / (M.rows - 1)) * 100}%`;
@@ -162,7 +167,8 @@
       root.setProperty('--cols', M.cols);
       root.setProperty('--rows', M.rows);
     },
-    attach(n, { skin, mode = 'still', seed, anchor = 0 }) {
+    attach(n, { skin, mode = 'still', seed, anchor = 0, face }) {
+      if (face) n.dataset.face = face;
       n.dataset.cat = skin;
       n.dataset.mode = mode;
       n.dataset.seed = seed || skin;

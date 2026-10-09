@@ -18,7 +18,7 @@ const CONFIG_PATH = path.join(ROOT, 'config.json');
 if (!fs.existsSync(CONFIG_PATH)) fs.copyFileSync(path.join(ROOT, 'config.example.json'), CONFIG_PATH);
 const config = {
   siteName: "God's Noisey BoyZ", password: 'changeme', port: 3000,
-  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5, crowd: 12,
+  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5, crowd: 24,
   ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')),
 };
 const PORT = Number(process.env.PORT) || config.port;

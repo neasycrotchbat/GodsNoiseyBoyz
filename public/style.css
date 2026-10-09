@@ -162,7 +162,8 @@ input:focus { border-color: var(--focus); outline: none; }
 .stage {
   grid-area: stage;
   position: relative;
-  overflow: auto;
+  overflow-x: hidden; /* big crowd cats at the edges hang off the sides */
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   background:
@@ -171,7 +172,7 @@ input:focus { border-color: var(--focus); outline: none; }
 .screen-wrap { padding: 1.2rem 16px 0; display: flex; justify-content: center; }
 .screen {
   position: relative;
-  width: min(720px, 100%, calc((100vh - 620px) * 1.78));
+  width: min(720px, 100%, calc((100vh - 660px) * 1.78));
   min-width: min(360px, 100%);
   aspect-ratio: 16 / 9;
   background: #000;
@@ -244,12 +245,27 @@ input:focus { border-color: var(--focus); outline: none; }
 }
 .platter { background-image: radial-gradient(circle, var(--neon) 0 3px, #1a1426 4px 8px, #2b2140 9px 10px, #1a1426 11px), linear-gradient(90deg, transparent 47%, rgba(255,255,255,.25) 47% 53%, transparent 53%); }
 
-.crowd { position: relative; flex: 1 0 auto; min-height: 190px; margin: 0.4rem 16px 0.8rem; }
+/* The crowd overlaps the booth (heads over the decks) and is cut off at the
+   bottom like a concert foreground. --k scales it to the floor's width (set by
+   app.js); each row sets --row-s. */
+.crowd {
+  --k: 1;
+  position: relative;
+  z-index: 3;
+  flex: 1 0 auto;
+  min-height: calc(230px * var(--k));
+  margin-top: calc(-70px * var(--k));
+  clip-path: inset(-800px 0 0 0); /* crop only the bottom edge */
+  pointer-events: none;           /* never block the seats behind it */
+}
 .fan { position: absolute; display: grid; justify-items: center; transform: translateX(-50%); }
-/* NPC cats stand further back: a little smaller and dimmer, so real people stay in front. */
-.fan.npc { pointer-events: none; }
-.npc-row2 .cat { --s: 1.05 !important; filter: brightness(0.78) saturate(0.85); }
-.npc-row3 .cat { --s: 0.9 !important; filter: brightness(0.62) saturate(0.75); }
+.crowd .cat { --s: calc(var(--row-s, 2) * var(--k)) !important; }
+.crowd-row0 .cat { filter: brightness(0.55) saturate(0.75); }
+.crowd-row1 .cat { filter: brightness(0.75) saturate(0.88); }
+.crowd-row2.npc .cat { filter: brightness(0.92); }
+.crowd .nametag { margin-bottom: calc(-10px * var(--k)); position: relative; z-index: 1; max-width: 96px; font-size: 0.75rem; }
+.crowd .fan.lift .nametag { margin-bottom: calc(14px * var(--k)); } /* neighbours' names sit at different heights */
+.crowd .nametag.me { color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
 .nametag {
   font: 600 0.8rem var(--display);
   background: rgba(18, 14, 29, 0.85);

@@ -40,17 +40,17 @@
   // Atlases and clips are described by cats/cats.json; dance.js picks the frames.
   // mode: dance | groove | chill | still. seed: whose dance sequence (user id).
   // anchor: server time the sequence starts from (the current song's start).
-  function catNode(catId, { size = 'md', mode = 'still', seed, anchor = 0 } = {}) {
+  function catNode(catId, { size = 'md', mode = 'still', seed, anchor = 0, face } = {}) {
     const n = el('span', 'cat cat-' + size);
-    setCat(n, catId, { mode, seed, anchor });
+    setCat(n, catId, { mode, seed, anchor, face });
     return n;
   }
-  function setCat(n, catId, { mode = 'still', seed, anchor = 0 } = {}) {
+  function setCat(n, catId, { mode = 'still', seed, anchor = 0, face } = {}) {
     n.style.backgroundImage = `url(cats/${catId}.png?v=${SPRITE_VERSION})`;
     n.setAttribute('role', 'img');
     const cat = CATS.find((c) => c.id === catId);
     n.setAttribute('aria-label', cat ? cat.name : 'cat');
-    Dance.attach(n, { skin: catId, mode, seed, anchor });
+    Dance.attach(n, { skin: catId, mode, seed, anchor, face });
   }
   const SPRITE_VERSION = 5;
 
@@ -59,7 +59,8 @@
   function makeNpcs(count) {
     return Array.from({ length: count }, (_, i) => {
       const rand = Dance.seedRand('npc:' + i);
-      return { id: 'npc:' + i, skin: CATS[Math.floor(rand() * CATS.length)].id, row: 2 + (i % 2), jitter: (rand() - 0.5) * 3 };
+      // Rows: 0 = back, 1 = middle, 2 = front (beside the real people).
+      return { id: 'npc:' + i, skin: CATS[Math.floor(rand() * CATS.length)].id, row: i % 3, jitter: (rand() - 0.5) * 3 };
     });
   }
 
@@ -293,50 +294,7 @@
     spot.classList.toggle('on', spotIndex >= 0);
     if (spotIndex >= 0) spot.style.left = `calc(16px + (100% - 32px) * ${(spotIndex + 0.5) / room.maxDjs})`;
 
-    // Crowd
-    const crowd = $('#crowd');
-    crowd.replaceChildren();
-    const fans = room.listeners.filter((id) => !room.djs.includes(id));
-    // Spread fans evenly across the floor in a stable order, staggering every other one back a row.
-    fans.sort((a, b) => hash(a) - hash(b));
-    fans.forEach((id, i) => {
-      const h = hash(id);
-      const row = i % 2;
-      const jitter = ((h >>> 5) % 7) - 3;
-      const fan = el('div', 'fan');
-      fan.style.left = `${8 + (84 * (i + 0.5)) / fans.length + jitter * 0.6}%`;
-      fan.style.bottom = `${6 + row * 30}px`;
-      fan.style.zIndex = String(10 - row);
-      // Awesome voters dance; everyone else grooves along, or chills between songs.
-      const mode = awesomes.has(id) ? 'dance' : c ? 'groove' : 'chill';
-      const cat = catNode(userCat(id), { size: 'md', mode, seed: id, anchor: c ? c.startedAt : 0 });
-      fan.append(cat, el('span', 'nametag', userName(id) + (id === me.id ? ' (you)' : '')));
-      let bubble = null;
-      if (snags.has(id)) bubble = ['Snag', 'bubble-snag'];
-      else if (awesomes.has(id)) bubble = ['Awesome', 'bubble-awesome'];
-      else if (lames.has(id)) bubble = ['Lame', 'bubble-lame'];
-      if (bubble) fan.append(el('span', 'bubble ' + bubble[1], bubble[0]));
-      crowd.append(fan);
-    });
-
-    // NPC cats fill the back of the floor. The more Awesomes a song gets, the
-    // more of them dance; Lames calm them down.
-    const hype = c ? Math.max(0.1, Math.min(0.85, 0.3 + 0.12 * c.awesomes.length - 0.1 * c.lames.length)) : 0;
-    const shown = npcs.slice(0, Math.min(npcs.length, Math.floor(crowd.clientWidth / 34)));
-    for (const [row, list] of [[2, shown.filter((n) => n.row === 2)], [3, shown.filter((n) => n.row === 3)]]) {
-      list.forEach((n, k) => {
-        const fan = el('div', 'fan npc npc-row' + row);
-        fan.setAttribute('aria-hidden', 'true');
-        // Rows interleave: each back-row cat stands in a gap of the row in front.
-        fan.style.left = `${4 + (92 * (k + (row === 2 ? 0.25 : 0.75))) / list.length + n.jitter}%`;
-        fan.style.bottom = `${row === 2 ? 62 : 86}px`;
-        fan.style.zIndex = String(6 - row);
-        const keen = c ? Dance.seedRand(n.id + c.startedAt)() : 1;
-        const mode = !c ? 'chill' : keen < hype ? 'dance' : 'groove';
-        fan.append(catNode(n.skin, { size: 'md', mode, seed: n.id, anchor: c ? c.startedAt : 0 }));
-        crowd.append(fan);
-      });
-    }
+    renderCrowd(c, awesomes, lames, snags);
 
     $('#online-count').textContent = `${room.listeners.length} here`;
     const inSeat = room.djs.includes(me.id);
@@ -345,6 +303,73 @@
     djBtn.disabled = !inSeat && room.djs.length >= room.maxDjs;
     $('#btn-skip').hidden = !(c && c.djId === me.id);
   }
+
+  // The crowd: a concert audience seen from behind, facing the DJ booth, with
+  // the back rows' heads over the booth. Three rows, biggest in front; real
+  // people stand in the front row with their names over their heads, NPCs
+  // fill in around and behind them. Everything scales with the floor's width.
+  const CROWD_ROWS = [
+    { s: 1.8, bottom: 95, spacing: 0.5 },   // back, dimmest
+    { s: 2.2, bottom: 45, spacing: 0.55 },  // middle
+    { s: 2.7, bottom: -55, spacing: 0.6 },  // front, cut off at the waist by the floor's edge
+  ];
+  function renderCrowd(c, awesomes, lames, snags) {
+    const crowd = $('#crowd');
+    crowd.replaceChildren();
+    const width = crowd.clientWidth || 700;
+    const k = Math.max(0.42, Math.min(1.15, width / 760));
+    crowd.style.setProperty('--k', k.toFixed(3));
+    const cap = (row) => Math.max(1, Math.floor(width / (64 * CROWD_ROWS[row].s * k * CROWD_ROWS[row].spacing)));
+    // The more Awesomes a song gets, the more NPCs dance; Lames calm them down.
+    const hype = c ? Math.max(0.1, Math.min(0.85, 0.3 + 0.12 * c.awesomes.length - 0.1 * c.lames.length)) : 0;
+    const anchor = c ? c.startedAt : 0;
+
+    const fans = room.listeners.filter((id) => !room.djs.includes(id));
+    let people = 0;
+    for (let row = 0; row < CROWD_ROWS.length; row++) {
+      let members = npcs.filter((n) => n.row === row).map((n) => ({ npc: n, id: n.id }));
+      if (row === 2) members = [...fans.map((id) => ({ id })), ...members.slice(0, Math.max(0, cap(2) - fans.length))];
+      else members = members.slice(0, cap(row));
+      // Stable spots: ordered by id hash, so people don't hop around on every update.
+      members.sort((a, b) => hash(a.id) - hash(b.id));
+      members.forEach((m, i) => {
+        const fan = el('div', `fan crowd-row${row}` + (m.npc ? ' npc' : ''));
+        // Each row is shifted a little so heads line up in the gaps of the row in front.
+        const shift = row === 1 ? 0.25 : row === 0 ? -0.25 : 0;
+        const jitter = m.npc ? m.npc.jitter : (((hash(m.id) >>> 5) % 7) - 3) * 0.6;
+        fan.style.left = `${3 + (94 * (i + 0.5 + shift)) / members.length + jitter}%`;
+        fan.style.bottom = `calc(${CROWD_ROWS[row].bottom}px * var(--k))`;
+        fan.style.zIndex = String(row * 10 + (m.npc ? 0 : 5));
+        fan.style.setProperty('--row-s', CROWD_ROWS[row].s);
+        if (m.npc) {
+          fan.setAttribute('aria-hidden', 'true');
+          const keen = c ? Dance.seedRand(m.id + c.startedAt)() : 1;
+          const mode = !c ? 'chill' : keen < hype ? 'dance' : 'groove';
+          fan.append(catNode(m.npc.skin, { mode, seed: m.id, anchor, face: 'stage' }));
+        } else {
+          // Awesome voters dance; everyone else grooves along, or chills between songs.
+          const id = m.id;
+          const mode = awesomes.has(id) ? 'dance' : c ? 'groove' : 'chill';
+          const tag = el('span', 'nametag' + (id === me.id ? ' me' : ''), userName(id) + (id === me.id ? ' (you)' : ''));
+          // Alternate people's name heights so neighbours' tags don't collide.
+          if (people++ % 2) fan.classList.add('lift');
+          fan.append(tag, catNode(userCat(id), { mode, seed: id, anchor, face: 'stage' }));
+          let bubble = null;
+          if (snags.has(id)) bubble = ['Snag', 'bubble-snag'];
+          else if (awesomes.has(id)) bubble = ['Awesome', 'bubble-awesome'];
+          else if (lames.has(id)) bubble = ['Lame', 'bubble-lame'];
+          if (bubble) fan.append(el('span', 'bubble ' + bubble[1], bubble[0]));
+        }
+        crowd.append(fan);
+      });
+    }
+  }
+  // Re-fit the crowd when the window changes size.
+  let crowdFit = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(crowdFit);
+    crowdFit = setTimeout(() => { if (room && me) renderStage(); }, 150);
+  });
 
   function renderNow() {
     const c = room && room.current;

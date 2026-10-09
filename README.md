@@ -53,7 +53,7 @@ The free quota covers about 100 searches a day plus thousands of song lookups, w
 | `youtubeApiKey` | Optional, see above. |
 | `maxDjs` | DJ seats at the booth, default 5. |
 | `lameSkipFraction` | Share of listeners whose Lame votes skip a song, default 0.5. |
-| `crowd` | NPC cats on the dance floor, default 12 (0 turns them off, 40 max). Small screens show fewer. |
+| `crowd` | NPC cats on the dance floor, default 24 (0 turns them off, 40 max). Narrow screens show fewer. |
 
 Restart `start.bat` after changing settings.
 
@@ -77,7 +77,7 @@ Each cat is a sprite atlas in `public/cats/`: 64×88 frames, 32 to a row, with o
 
 There are eleven cats to pick from: Biscuit, Smokey, Midnight, Pepper, Mochi, Ginger (tabby in a scarf), Snowball (white, with a daisy), Ash (blue-gray in a bow tie), Tortie (tortoiseshell in a beanie), Bengal (spotted, in a party hat) and Cocoa (chocolate in shades).
 
-**The crowd:** NPC cats fill the back of the dance floor, slightly smaller and dimmer than real people. Everyone sees the same crowd. They bob along during songs and cheer when a new one starts. The more Awesome votes a song gets, the more of them dance; Lame votes calm them down.
+**The crowd:** the dance floor is a concert crowd seen from behind, facing the DJ booth: three rows of big cats, the back rows' heads over the decks and the front row cut off at the waist. They turn around to face you now and then mid-dance. Real people stand in the front row with their names over their heads (yours in amber); NPC cats fill in around and behind them, dimmer the further back they are. Everyone sees the same crowd. They bob along during songs and cheer when a new one starts; the more Awesome votes a song gets, the more of them dance, and Lame votes calm them down. The whole scene scales to the width of the screen.
 
 ## Regenerating the cat art
 
