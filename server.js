@@ -18,7 +18,7 @@ const CONFIG_PATH = path.join(ROOT, 'config.json');
 if (!fs.existsSync(CONFIG_PATH)) fs.copyFileSync(path.join(ROOT, 'config.example.json'), CONFIG_PATH);
 const config = {
   siteName: "God's Noisey BoyZ", password: 'changeme', port: 3000,
-  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5,
+  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5, crowd: 12,
   ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')),
 };
 const PORT = Number(process.env.PORT) || config.port;
@@ -32,7 +32,7 @@ const CAT_IDS = new Set(CATS.cats.map((c) => c.id));
 
 // ------------------------------------------------------------------ storage
 const DB_PATH = path.join(DATA_DIR, 'db.json');
-const db = { users: {}, queues: {}, history: [], chat: [] };
+const db = { users: {}, queues: {}, history: [], chat: [], playlists: [] };
 if (fs.existsSync(DB_PATH)) {
   try { Object.assign(db, JSON.parse(fs.readFileSync(DB_PATH, 'utf8'))); } catch (e) {
     console.error('Could not read data/db.json, starting fresh:', e.message);
@@ -48,6 +48,7 @@ function save() {
   }, 800);
 }
 
+const MAX_QUEUE = 2000; // songs per queue (big imported playlists fit)
 const newId = () => crypto.randomBytes(8).toString('hex');
 const queueOf = (uid) => (db.queues[uid] ||= []);
 const publicUser = (u) => u && { id: u.id, name: u.name, cat: u.cat, points: u.points || 0 };
@@ -71,8 +72,38 @@ function passwordOk(input) {
   const b = crypto.createHash('sha256').update(String(config.password)).digest();
   return crypto.timingSafeEqual(a, b);
 }
+// Invite links carry a code derived from the password, so changing the
+// password in config.json also retires every old invite link.
+const INVITE_CODE = crypto.createHmac('sha256', SECRET).update('invite:' + config.password).digest('base64url').slice(0, 16);
+function inviteOk(input) {
+  const a = Buffer.from(String(input || ''));
+  const b = Buffer.from(INVITE_CODE);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// share.bat logs cloudflared's output here; the newest quick-tunnel address in it
+// is the room's public link (checked live before we hand it out).
+const TUNNEL_LOG = path.join(DATA_DIR, 'tunnel.log');
+async function publicUrl() {
+  let text = '';
+  try { text = fs.readFileSync(TUNNEL_LOG, 'utf8'); } catch { return null; }
+  const found = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+  if (!found) return null;
+  const url = found[found.length - 1];
+  try {
+    const res = await fetch(url + '/api/me', { signal: AbortSignal.timeout(5000) });
+    return res.ok ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 function cleanName(raw) {
   return String(raw || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20);
+}
+function playlistName(raw) {
+  return String(raw || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim()
+    .slice(0, 60).replace(/[\s\-–—|:,·]+$/, '');
 }
 
 // Login throttle: 8 wrong passwords per IP per 10 minutes.
@@ -92,7 +123,10 @@ app.use((req, res, next) => {
 
 app.get('/api/me', (req, res) => {
   const user = verify(readCookie(req.headers.cookie));
-  res.json({ siteName: config.siteName, user: publicUser(user), cats: CATS.cats, sprites: CATS, hasApiKey: !!config.youtubeApiKey });
+  res.json({
+    siteName: config.siteName, user: publicUser(user), cats: CATS.cats, sprites: CATS, hasApiKey: !!config.youtubeApiKey,
+    crowd: Math.max(0, Math.min(40, Number(config.crowd) || 0)), // NPC cats on the dance floor
+  });
 });
 
 app.post('/api/login', (req, res) => {
@@ -102,12 +136,14 @@ app.post('/api/login', (req, res) => {
   if (rec && rec.count >= 8 && now - rec.first < 10 * 60e3) {
     return res.status(429).json({ error: 'Too many tries. Wait a few minutes and try again.' });
   }
-  const { password, name, cat } = req.body || {};
-  if (!passwordOk(password)) {
+  const { password, invite, name, cat } = req.body || {};
+  if (!(invite ? inviteOk(invite) : passwordOk(password))) {
     const r = rec && now - rec.first < 10 * 60e3 ? rec : { count: 0, first: now };
     r.count++;
     failures.set(ip, r);
-    return res.status(401).json({ error: "That's not the password." });
+    return res.status(401).json(invite
+      ? { error: 'That invite link is out of date. Ask for a new one, or type the password.', badInvite: true }
+      : { error: "That's not the password." });
   }
   failures.delete(ip);
   const clean = cleanName(name);
@@ -127,12 +163,19 @@ app.post('/api/login', (req, res) => {
   res.json({ user: publicUser(user) });
 });
 
+// Anyone already in the room can hand out the invite link.
+app.get('/api/invite', async (req, res) => {
+  if (!verify(readCookie(req.headers.cookie))) return res.status(401).json({ error: 'Log in first.' });
+  res.json({ code: INVITE_CODE, publicUrl: await publicUrl() });
+});
+
 app.post('/api/logout', (req, res) => {
   res.clearCookie(COOKIE, { path: '/' });
   res.json({ ok: true });
 });
 
-app.use(express.static(path.join(ROOT, 'public'), { maxAge: '1h' }));
+// No max-age: browsers revalidate (cheap 304s via ETag), so updates reach everyone on the next load.
+app.use(express.static(path.join(ROOT, 'public')));
 
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 64 * 1024 });
@@ -178,6 +221,16 @@ const pushRoom = () => io.emit('room', roomPayload());
 const pushUsers = () => io.emit('users', Object.values(db.users).map(publicUser));
 const pushQueue = (uid) => io.to('u:' + uid).emit('queue', queueOf(uid));
 const pushHistory = () => io.emit('history', db.history.slice(-100));
+// Saved playlists are shared with the whole room; only the songs' summary goes out.
+const playlistSummaries = () => db.playlists.map((p) => ({
+  id: p.id, name: p.name, ownerId: p.ownerId, count: p.songs.length,
+  duration: p.songs.reduce((t, s) => t + (s.duration || 0), 0),
+}));
+const pushPlaylists = () => io.emit('playlists', playlistSummaries());
+const copySong = (s) => ({
+  id: newId(), videoId: s.videoId, title: s.title, channel: s.channel, duration: s.duration,
+  thumb: s.thumb, addedAt: Date.now(), ...(s.blocked ? { blocked: true } : {}),
+});
 
 function removeDj(uid) {
   const i = room.djs.indexOf(uid);
@@ -213,14 +266,17 @@ function playNext() {
     room.turn %= room.djs.length;
     const djId = room.djs[room.turn];
     const q = queueOf(djId);
-    const idx = q.findIndex((s) => !s.blocked);
+    // Only songs that haven't played yet; a DJ who has played everything steps down.
+    const idx = db.users[djId]?.shuffle ? shufflePick(q) : q.findIndex(playable);
     if (idx === -1) {
       removeDj(djId);
-      system(`${db.users[djId]?.name || 'A DJ'} ran out of songs and stepped down.`);
+      system(`${db.users[djId]?.name || 'A DJ'} played every song in their queue and left the decks.`);
       continue;
     }
-    // Turntable rule: the song you play goes to the bottom of your queue.
+    // Turntable rule: the song you play goes to the bottom of your queue, marked played.
     const [song] = q.splice(idx, 1);
+    song.played = true;
+    song.lastPlayed = Date.now();
     q.push(song);
     pushQueue(djId);
     // Don't wrap here: if someone joins the booth before the next song, they're next in line.
@@ -236,6 +292,15 @@ function playNext() {
   }
   room.current = null;
   pushRoom();
+}
+
+const playable = (s) => !s.blocked && !s.played;
+
+// Shuffle play: a random pick from the songs that haven't played yet.
+function shufflePick(q) {
+  const ok = q.map((s, i) => [s, i]).filter(([s]) => playable(s));
+  if (!ok.length) return -1;
+  return ok[Math.floor(Math.random() * ok.length)][1];
 }
 
 function scheduleEnd() {
@@ -291,6 +356,8 @@ io.on('connection', (socket) => {
     me: publicUser(me()),
     users: Object.values(db.users).map(publicUser),
     queue: queueOf(uid),
+    shuffle: !!me().shuffle,
+    playlists: playlistSummaries(),
     history: db.history.slice(-100),
     chat: db.chat.slice(-100),
     room: roomPayload(),
@@ -348,13 +415,18 @@ io.on('connection', (socket) => {
       let added = 0;
       let blocked = 0;
       for (const s of songs) {
-        if (have.has(s.videoId)) continue;
+        if (have.has(s.videoId)) {
+          // Re-adding a song that already played queues it up to play again.
+          const old = q.find((x) => x.videoId === s.videoId && x.played);
+          if (old) { delete old.played; added++; }
+          continue;
+        }
         if (!s.embeddable) { blocked++; continue; }
         have.add(s.videoId);
         q.push({ id: newId(), videoId: s.videoId, title: s.title, channel: s.channel, duration: s.duration, thumb: s.thumb, addedAt: Date.now() });
         added++;
       }
-      if (q.length > 1000) q.splice(0, q.length - 1000);
+      if (q.length > MAX_QUEUE) q.splice(0, q.length - MAX_QUEUE);
       save();
       pushQueue(uid);
       reply(ack, { added, blocked, skipped: songs.length - added - blocked });
@@ -394,7 +466,51 @@ io.on('connection', (socket) => {
     pushQueue(uid);
   });
 
+  // Batch edits from a multi-select in the queue.
+  const idSet = (ids) => new Set(Array.isArray(ids) ? ids.slice(0, MAX_QUEUE).map(String) : []);
+  socket.on('queue:removeMany', (ids) => {
+    const drop = idSet(ids);
+    const q = queueOf(uid);
+    const keep = q.filter((s) => !drop.has(s.id));
+    if (keep.length === q.length) return;
+    q.splice(0, q.length, ...keep);
+    save();
+    pushQueue(uid);
+  });
+
+  // Moves the chosen songs, in their current order, to the top, the bottom, or
+  // just before another song.
+  socket.on('queue:moveMany', ({ ids, to, before } = {}) => {
+    const pick = idSet(ids);
+    const q = queueOf(uid);
+    const moved = q.filter((s) => pick.has(s.id));
+    if (!moved.length) return;
+    const rest = q.filter((s) => !pick.has(s.id));
+    let at = rest.length;
+    if (to === 'top') at = 0;
+    else if (before) {
+      const i = rest.findIndex((s) => s.id === before);
+      if (i !== -1) at = i;
+    }
+    rest.splice(at, 0, ...moved);
+    q.splice(0, q.length, ...rest);
+    save();
+    pushQueue(uid);
+  });
+
   socket.on('queue:clear', () => { db.queues[uid] = []; save(); pushQueue(uid); });
+
+  socket.on('queue:replayAll', () => {
+    for (const s of queueOf(uid)) delete s.played;
+    save();
+    pushQueue(uid);
+  });
+
+  socket.on('queue:shufflePlay',(on, ack) => {
+    me().shuffle = !!on;
+    save();
+    reply(ack, { shuffle: me().shuffle });
+  });
 
   socket.on('queue:shuffle', () => {
     const q = queueOf(uid);
@@ -406,11 +522,98 @@ io.on('connection', (socket) => {
     pushQueue(uid);
   });
 
+  // ---- saved playlists
+  socket.on('playlist:save', ({ name } = {}, ack) => {
+    const clean = playlistName(name) || 'Untitled';
+    const q = queueOf(uid);
+    if (!q.length) return reply(ack, { error: 'Your queue is empty, so there is nothing to save.' });
+    // Saving under a name you already used updates that playlist.
+    let p = db.playlists.find((x) => x.ownerId === uid && x.name.toLowerCase() === clean.toLowerCase());
+    if (!p) {
+      if (db.playlists.filter((x) => x.ownerId === uid).length >= 50) return reply(ack, { error: 'You have 50 playlists already. Delete one first.' });
+      p = { id: newId(), name: clean, ownerId: uid, createdAt: Date.now() };
+      db.playlists.push(p);
+    }
+    p.songs = q.map(copySong);
+    p.updatedAt = Date.now();
+    save();
+    pushPlaylists();
+    reply(ack, { ok: true, id: p.id, name: p.name, count: p.songs.length });
+  });
+
+  // Import a YouTube playlist as a saved playlist. Without an API key the browser
+  // reads the video ids through the YouTube player and sends them along.
+  socket.on('playlist:import', async ({ playlistId, ids } = {}, ack) => {
+    if (!rateLimit(socket, 'importRate', 3, 30000)) return reply(ack, { error: 'Slow down a little.' });
+    try {
+      if (!/^[A-Za-z0-9_-]{10,64}$/.test(String(playlistId || ''))) throw yt.userError("That doesn't look like a YouTube playlist link.");
+      const key = config.youtubeApiKey;
+      const [found, title] = await Promise.all([
+        Array.isArray(ids) ? yt.lookupMany(ids.slice(0, 300).map(String), key) : yt.importPlaylist(playlistId, key),
+        yt.playlistTitle(playlistId, key),
+      ]);
+      const seen = new Set();
+      const songs = found.filter((s) => s.embeddable && !seen.has(s.videoId) && seen.add(s.videoId));
+      if (!songs.length) throw yt.userError("Couldn't read any playable songs from that playlist.");
+      const name = playlistName(title) || 'YouTube playlist';
+      // Importing the same YouTube playlist again refreshes your copy.
+      let p = db.playlists.find((x) => x.ownerId === uid && x.source === playlistId);
+      if (!p) {
+        if (db.playlists.filter((x) => x.ownerId === uid).length >= 50) throw yt.userError('You have 50 playlists already. Delete one first.');
+        p = { id: newId(), ownerId: uid, source: playlistId, createdAt: Date.now() };
+        db.playlists.push(p);
+      }
+      p.name = name;
+      p.songs = songs.map(copySong);
+      p.updatedAt = Date.now();
+      save();
+      pushPlaylists();
+      reply(ack, { ok: true, id: p.id, name: p.name, count: p.songs.length, blocked: found.length - songs.length });
+    } catch (e) {
+      fail(ack, e);
+    }
+  });
+
+  socket.on('playlist:load',({ id, mode } = {}, ack) => {
+    const p = db.playlists.find((x) => x.id === id);
+    if (!p) return reply(ack, { error: 'That playlist is gone.' });
+    const songs = p.songs.map(copySong);
+    if (mode === 'append') {
+      const q = queueOf(uid);
+      const have = new Set(q.map((s) => s.videoId));
+      const fresh = songs.filter((s) => !have.has(s.videoId));
+      q.push(...fresh);
+      if (q.length > MAX_QUEUE) q.splice(0, q.length - MAX_QUEUE);
+      reply(ack, { ok: true, added: fresh.length });
+    } else {
+      db.queues[uid] = songs;
+      reply(ack, { ok: true, added: songs.length });
+    }
+    save();
+    pushQueue(uid);
+  });
+
+  // Anyone in the room can tidy up playlists; chat says who removed what.
+  socket.on('playlist:delete', (id, ack) => {
+    const i = db.playlists.findIndex((x) => x.id === id);
+    if (i === -1) return reply(ack, { error: 'That playlist is already gone.' });
+    const [p] = db.playlists.splice(i, 1);
+    save();
+    pushPlaylists();
+    if (p.ownerId !== uid) system(`${me().name} removed the playlist "${p.name}" (saved by ${db.users[p.ownerId]?.name || 'someone'}).`);
+    reply(ack, { ok: true });
+  });
+
   // ---- decks
   socket.on('dj:up', (ack) => {
     if (room.djs.includes(uid)) return reply(ack, { ok: true });
     if (room.djs.length >= config.maxDjs) return reply(ack, { error: 'All the DJ seats are taken.' });
-    if (!queueOf(uid).some((s) => !s.blocked)) return reply(ack, { error: 'Add some songs to your queue first.' });
+    const q = queueOf(uid);
+    if (!q.some(playable)) {
+      return reply(ack, { error: q.some((s) => s.played && !s.blocked)
+        ? 'Every song in your queue has played. Add new songs, load a playlist, or press "Replay all".'
+        : 'Add some songs to your queue first.' });
+    }
     room.djs.push(uid);
     system(`${me().name} stepped up to the decks.`);
     if (!room.current) playNext();

@@ -8,14 +8,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Pixelify+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <!-- Door: password, name, cat -->
   <main id="door" class="door" hidden>
     <h1 class="sign"><span class="sign-text" data-site-name>God's Noisey BoyZ</span></h1>
     <form id="door-form" class="door-form" autocomplete="on">
-      <label class="field">
+      <p id="door-invited" class="door-invited" hidden>You're invited! Pick a name and a cat to come in.</p>
+      <label id="door-password-field" class="field">
         <span>Password</span>
         <input id="door-password" type="password" name="password" required autocomplete="current-password">
       </label>
@@ -38,6 +39,7 @@
       <div class="sign sign-small"><span class="sign-text" data-site-name>God's Noisey BoyZ</span></div>
       <div class="topbar-right">
         <span id="online-count" class="online"></span>
+        <button id="invite-btn" class="btn btn-quiet btn-invite" type="button">Invite friends</button>
         <button id="me-btn" class="me-btn" type="button" aria-haspopup="true">
           <span id="me-cat" class="cat cat-xs"></span><span id="me-name"></span>
         </button>
@@ -48,6 +50,7 @@
       <div class="screen-wrap">
         <div class="screen">
           <div id="player"></div>
+          <div class="screen-guard" aria-hidden="true"></div>
           <div id="screen-empty" class="screen-empty">
             <p>The decks are empty.</p>
             <p class="muted">Add songs to your queue, then take a seat.</p>
@@ -81,6 +84,7 @@
       <div class="np-dj">
         <button id="btn-dj" class="btn" type="button">Step up to DJ</button>
         <button id="btn-skip" class="btn btn-quiet" type="button" hidden>Skip my song</button>
+        <button id="btn-mute" class="btn btn-quiet btn-mute" type="button" aria-pressed="false" title="Mute your speakers (the room keeps playing)">Mute</button>
         <label class="volume">
           <span class="sr-only">Volume</span>
           <input id="volume" type="range" min="0" max="100" value="70">
@@ -109,14 +113,9 @@
 
       <div class="panel" data-panel="queue" hidden>
         <form id="add-form" class="add-form">
-          <input id="add-input" type="text" placeholder="Paste a YouTube link or playlist link" aria-label="YouTube link">
+          <input id="add-input" type="text" placeholder="Paste a YouTube song link" aria-label="YouTube song link">
           <button class="btn" type="submit">Add</button>
         </form>
-        <div id="add-choice" class="add-choice" hidden>
-          <span>This link is a song inside a playlist.</span>
-          <button class="btn btn-quiet" type="button" data-mode="video">Add this song</button>
-          <button class="btn btn-quiet" type="button" data-mode="playlist">Import whole playlist</button>
-        </div>
         <form id="search-form" class="add-form" hidden>
           <input id="search-input" type="search" placeholder="Search YouTube" aria-label="Search YouTube">
           <button class="btn btn-quiet" type="submit">Search</button>
@@ -126,11 +125,35 @@
         <div class="queue-tools">
           <span id="queue-summary" class="muted"></span>
           <span>
-            <button id="q-shuffle" class="link-btn" type="button">Shuffle</button>
+            <button id="q-shuffle-play" class="link-btn" type="button" aria-pressed="false" title="Play a random song from your queue on each of your turns">Shuffle play: off</button>
+            <button id="q-shuffle" class="link-btn" type="button" title="Mix up the order of your queue once">Mix order</button>
+            <button id="q-replay" class="link-btn" type="button" title="Mark every song as unplayed so they can play again" hidden>Replay all</button>
             <button id="q-clear" class="link-btn" type="button">Clear</button>
           </span>
         </div>
-        <ol id="queue" class="songs"></ol>
+        <ol id="queue" class="songs queue-list" aria-multiselectable="true"></ol>
+        <!-- Below the list, so songs don't shift under the pointer when it appears -->
+        <div id="q-selection" class="q-selection" role="toolbar" aria-label="Selected songs" hidden>
+          <span id="q-sel-count"></span>
+          <button id="q-sel-top" class="btn btn-quiet" type="button">Move to top</button>
+          <button id="q-sel-bottom" class="link-btn" type="button">Move to bottom</button>
+          <button id="q-sel-remove" class="link-btn" type="button">Remove</button>
+          <button id="q-sel-all" class="link-btn" type="button">Select all</button>
+          <button id="q-sel-clear" class="link-btn" type="button">Clear</button>
+        </div>
+
+        <!-- Saved playlists: your queue on top, then imported/saved lists you can load -->
+        <details id="library" class="library">
+          <summary>Playlists <span id="pl-count" class="pill"></span></summary>
+          <div class="library-body">
+            <form id="import-form" class="add-form">
+              <input id="import-input" type="text" placeholder="Paste a YouTube playlist link" aria-label="YouTube playlist link">
+              <button class="btn" type="submit">Import</button>
+            </form>
+            <p id="import-status" class="status" role="status"></p>
+            <ol id="playlists" class="playlists"></ol>
+          </div>
+        </details>
       </div>
 
       <div class="panel" data-panel="history" hidden>
@@ -155,6 +178,26 @@
     </form>
   </dialog>
 
+  <!-- Invite link: password built in, so friends just pick a name and cat -->
+  <dialog id="invite-dialog" class="dialog">
+    <form method="dialog">
+      <h2>Invite friends</h2>
+      <p id="invite-help" class="muted"></p>
+      <div id="invite-url-row" class="add-form" hidden>
+        <input id="invite-public" type="text" placeholder="https://something.trycloudflare.com" aria-label="Public address">
+        <button id="invite-use" class="btn btn-quiet" type="button">Use</button>
+      </div>
+      <div class="add-form">
+        <input id="invite-link" type="text" readonly aria-label="Invite link">
+        <button id="invite-copy" class="btn" type="button">Copy</button>
+      </div>
+      <p id="invite-status" class="status" role="status"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" value="close">Done</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Browsers need one click before music can play -->
   <div id="gate" class="gate" hidden>
     <button id="gate-btn" class="btn btn-big" type="button">Join the party</button>
@@ -162,6 +205,7 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="app.js"></script>
+  <script src="dance.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

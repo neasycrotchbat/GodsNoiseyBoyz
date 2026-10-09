@@ -81,14 +81,15 @@ input:focus { border-color: var(--focus); outline: none; }
 .form-error { color: var(--lame); min-height: 1.4em; margin: 0; }
 
 /* ---------------- cats */
-:root { --frame-w: 64px; --frame-h: 80px; --frames: 24; }
+/* Atlas size comes from cats.json (set by dance.js); frames are picked by background-position. */
+:root { --frame-w: 64px; --frame-h: 88px; --cols: 32; --rows: 18; }
 .cat {
   --s: 1.5;
   display: inline-block;
   width: calc(var(--frame-w) * var(--s));
   height: calc(var(--frame-h) * var(--s));
   background-repeat: no-repeat;
-  background-size: calc(var(--frame-w) * var(--frames) * var(--s)) calc(var(--frame-h) * var(--s));
+  background-size: calc(var(--frame-w) * var(--cols) * var(--s)) calc(var(--frame-h) * var(--rows) * var(--s));
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
@@ -179,6 +180,10 @@ input:focus { border-color: var(--focus); outline: none; }
   box-shadow: 0 0 0 2px var(--line), 0 18px 40px rgba(0, 0, 0, 0.45);
 }
 .screen #player, .screen iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Sits over the video so clicks can't pause it; playback follows the room. */
+.screen-guard { position: absolute; inset: 0; z-index: 1; }
+.playlist-reader { position: fixed; left: -10000px; top: 0; width: 320px; height: 180px; pointer-events: none; }
+#q-shuffle-play[aria-pressed="true"] { color: var(--mint); font-weight: 700; }
 .screen-empty {
   position: absolute; inset: 0;
   display: grid; place-content: center; text-align: center;
@@ -241,6 +246,10 @@ input:focus { border-color: var(--focus); outline: none; }
 
 .crowd { position: relative; flex: 1 0 auto; min-height: 190px; margin: 0.4rem 16px 0.8rem; }
 .fan { position: absolute; display: grid; justify-items: center; transform: translateX(-50%); }
+/* NPC cats stand further back: a little smaller and dimmer, so real people stay in front. */
+.fan.npc { pointer-events: none; }
+.npc-row2 .cat { --s: 1.05 !important; filter: brightness(0.78) saturate(0.85); }
+.npc-row3 .cat { --s: 0.9 !important; filter: brightness(0.62) saturate(0.75); }
 .nametag {
   font: 600 0.8rem var(--display);
   background: rgba(18, 14, 29, 0.85);
@@ -336,7 +345,29 @@ input:focus { border-color: var(--focus); outline: none; }
 .add-choice { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.9rem; }
 .status { margin: 0; font-size: 0.9rem; color: var(--muted); min-height: 1.3em; }
 .status.error { color: var(--lame); }
-.queue-tools { display: flex; justify-content: space-between; font-size: 0.85rem; }
+.queue-tools { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.3rem; font-size: 0.85rem; }
+/* Queue tab: the song list scrolls on its own so the Playlists drawer stays pinned at the bottom. */
+.panel[data-panel="queue"] { overflow: hidden; }
+.queue-list { flex: 1; min-height: 6rem; overflow-y: auto; }
+.library { flex-shrink: 0; border: 2px solid var(--line); border-radius: 6px; background: #1b1530; }
+.library summary { cursor: pointer; padding: 0.6rem 0.8rem; font: 600 1rem var(--display); color: var(--amber); list-style: none; }
+.library summary::-webkit-details-marker { display: none; }
+.library summary::before { content: "\25B8"; display: inline-block; margin-right: 0.45rem; transition: transform 0.15s; }
+.library[open] summary::before { transform: rotate(90deg); }
+.library-body { display: flex; flex-direction: column; gap: 0.5rem; padding: 0 0.8rem 0.8rem; max-height: 45vh; overflow-y: auto; }
+.playlists { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.pl-row { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center; padding: 0.45rem 0.6rem; border-radius: 4px; background: rgba(255, 255, 255, 0.04); }
+.pl-row.current { background: rgba(255, 201, 77, 0.12); border: 1px solid var(--amber); }
+.pl-name { font-weight: 700; overflow-wrap: anywhere; }
+.pl-meta { font-size: 0.8rem; color: var(--muted); }
+.pl-actions { display: flex; gap: 0.2rem; align-items: center; }
+.pl-actions .btn { padding: 0.35rem 0.6rem; font-size: 0.85rem; }
+.btn-mute { padding: 0.45rem 0.6rem; font-size: 0.9rem; }
+.btn-invite { padding: 0.4rem 0.6rem; font-size: 0.85rem; }
+.door-invited { margin: 0; padding: 0.6rem 0.8rem; border: 2px solid var(--mint); border-radius: 4px; color: var(--mint); }
+#invite-dialog { max-width: min(520px, calc(100vw - 32px)); }
+#invite-dialog .add-form { margin-bottom: 0.5rem; }
+.btn-mute[aria-pressed="true"] { background: var(--lame); border-color: var(--lame); color: #2a1a05; }
 
 .songs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
 .song {
@@ -352,6 +383,14 @@ input:focus { border-color: var(--focus); outline: none; }
 .song.dragging { opacity: 0.4; }
 .song.drop-before { box-shadow: inset 0 3px 0 var(--amber); }
 .song.blocked { opacity: 0.5; }
+.song.played { opacity: 0.55; }
+.queue-list .song { cursor: pointer; }
+.song.selected { background: rgba(143, 220, 255, 0.16); box-shadow: inset 3px 0 0 var(--focus); opacity: 1; }
+.q-selection { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; font-size: 0.85rem;
+  padding: 0.4rem 0.6rem; border: 2px solid var(--focus); border-radius: 6px; background: rgba(143, 220, 255, 0.08); }
+.q-selection .btn { padding: 0.3rem 0.6rem; font-size: 0.85rem; }
+#q-sel-count { font-weight: 700; color: var(--focus); margin-right: auto; }
+.song.played .song-meta { color: var(--mint); }
 .song img { width: 64px; height: 36px; object-fit: cover; border-radius: 2px; background: #120e1d; }
 .song-title { font-size: 0.9rem; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .song-meta { font-size: 0.78rem; color: var(--muted); }

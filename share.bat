@@ -14,8 +14,12 @@ if errorlevel 1 (
 )
 
 echo Opening a public link to your room...
-echo Look below for an address ending in .trycloudflare.com and send it to your friends.
+echo Once it's up, press "Invite friends" in the room to copy a link that lets
+echo friends straight in. Keep this window open; closing it ends the link.
 echo The address changes each time you run this. See the README for a permanent one.
 echo.
-cloudflared tunnel --url http://localhost:3000
+rem The room reads the public address from this log to build invite links.
+if not exist data mkdir data
+if exist data\tunnel.log del data\tunnel.log
+cloudflared tunnel --logfile data\tunnel.log --url http://localhost:3000
 pause

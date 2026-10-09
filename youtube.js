@@ -1,6 +1,7 @@
 // YouTube helpers: URL parsing, metadata lookup, playlist import and search.
-// Works without an API key for single videos (via oEmbed); playlist import and
-// search need a free YouTube Data API v3 key in config.json.
+// Works without an API key for single videos (via oEmbed) and for playlists the
+// browser has read (lookupMany); server-side playlist import and search need a
+// free YouTube Data API v3 key in config.json.
 
 const API = 'https://www.googleapis.com/youtube/v3';
 const ID_RE = /^[A-Za-z0-9_-]{11}$/;
@@ -101,7 +102,24 @@ async function lookupVideo(videoId, key) {
   }
 }
 
-async function importPlaylist(playlistId, key, limit = 300) {
+// Look up a list of video ids, e.g. a playlist read by the browser's player.
+// With a key this is one API call per 50; without, a few oEmbed calls at a time.
+async function lookupMany(ids, key) {
+  ids = [...new Set(ids.filter((id) => ID_RE.test(id)))];
+  if (key) return videosByIds(ids, key);
+  const out = new Array(ids.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < ids.length) {
+      const i = next++;
+      try { out[i] = await lookupVideo(ids[i], ''); } catch { out[i] = null; } // private or deleted
+    }
+  };
+  await Promise.all(Array.from({ length: 8 }, worker));
+  return out.filter(Boolean);
+}
+
+async function importPlaylist(playlistId, key, limit = 2000) {
   if (!key) throw userError('Playlist import needs a YouTube API key. See the README for the free 5-minute setup.');
   const ids = [];
   let pageToken = '';
@@ -122,6 +140,20 @@ async function importPlaylist(playlistId, key, limit = 300) {
   return videosByIds(ids.slice(0, limit), key);
 }
 
+// The playlist's name on YouTube, or '' if it can't be found.
+async function playlistTitle(playlistId, key) {
+  try {
+    if (key) {
+      const data = await getJson(`${API}/playlists?part=snippet&id=${encodeURIComponent(playlistId)}&key=${encodeURIComponent(key)}`);
+      return (data.items && data.items[0] && data.items[0].snippet.title) || '';
+    }
+    const data = await getJson(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent('https://www.youtube.com/playlist?list=' + playlistId)}`);
+    return data.title || '';
+  } catch {
+    return '';
+  }
+}
+
 async function search(q, key) {
   if (!key) throw userError('Search needs a YouTube API key. You can still paste links.');
   const data = await getJson(`${API}/search?part=snippet&type=video&videoEmbeddable=true&maxResults=10&q=${encodeURIComponent(q)}&key=${encodeURIComponent(key)}`);
@@ -135,4 +167,4 @@ function userError(message) {
   return e;
 }
 
-module.exports = { parseUrl, parseDuration, lookupVideo, importPlaylist, search, userError };
+module.exports = { parseUrl, parseDuration, lookupVideo, lookupMany, importPlaylist, playlistTitle, search, userError };

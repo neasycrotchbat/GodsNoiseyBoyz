@@ -1,17 +1,224 @@
 {
   "frameWidth": 64,
-  "frameHeight": 80,
-  "frames": 24,
-  "animations": {
-    "dance": {
+  "frameHeight": 88,
+  "cols": 32,
+  "rows": 24,
+  "tweenFps": 12,
+  "views": {
+    "front": 0,
+    "side": 8,
+    "back": 16
+  },
+  "clips": {
+    "swing": {
+      "name": "Swing step",
+      "kind": "move",
       "start": 0,
       "count": 16,
-      "fps": 12
+      "fps": 12,
+      "out": {
+        "start": 184,
+        "count": 2
+      },
+      "in": {
+        "start": 186,
+        "count": 3
+      }
+    },
+    "shuffle": {
+      "name": "Side shuffle",
+      "kind": "move",
+      "start": 16,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 189,
+        "count": 2
+      },
+      "in": {
+        "start": 191,
+        "count": 3
+      }
+    },
+    "kneeup": {
+      "name": "Knee-up groove",
+      "kind": "move",
+      "start": 32,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 194,
+        "count": 2
+      },
+      "in": {
+        "start": 196,
+        "count": 3
+      }
+    },
+    "elbows": {
+      "name": "Elbow bounce",
+      "kind": "move",
+      "start": 48,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 199,
+        "count": 2
+      },
+      "in": {
+        "start": 201,
+        "count": 3
+      }
+    },
+    "stomp": {
+      "name": "Party stomp",
+      "kind": "move",
+      "start": 64,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 204,
+        "count": 2
+      },
+      "in": {
+        "start": 206,
+        "count": 3
+      }
+    },
+    "twist": {
+      "name": "The twist",
+      "kind": "move",
+      "start": 80,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 209,
+        "count": 2
+      },
+      "in": {
+        "start": 211,
+        "count": 3
+      }
+    },
+    "disco": {
+      "name": "Disco point",
+      "kind": "move",
+      "start": 96,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 214,
+        "count": 2
+      },
+      "in": {
+        "start": 216,
+        "count": 3
+      }
+    },
+    "roof": {
+      "name": "Raise the roof",
+      "kind": "move",
+      "start": 112,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 219,
+        "count": 2
+      },
+      "in": {
+        "start": 221,
+        "count": 3
+      }
+    },
+    "wave": {
+      "name": "Hands in the air",
+      "kind": "move",
+      "start": 128,
+      "count": 16,
+      "fps": 12,
+      "out": {
+        "start": 224,
+        "count": 2
+      },
+      "in": {
+        "start": 226,
+        "count": 3
+      }
+    },
+    "cheer": {
+      "name": "Cheer",
+      "kind": "react",
+      "start": 144,
+      "count": 8,
+      "fps": 12,
+      "out": {
+        "start": 229,
+        "count": 2
+      },
+      "in": {
+        "start": 231,
+        "count": 3
+      }
+    },
+    "jump": {
+      "name": "Jump",
+      "kind": "react",
+      "start": 152,
+      "count": 8,
+      "fps": 12,
+      "out": {
+        "start": 234,
+        "count": 2
+      },
+      "in": {
+        "start": 236,
+        "count": 3
+      }
+    },
+    "clap": {
+      "name": "Clap",
+      "kind": "react",
+      "start": 160,
+      "count": 8,
+      "fps": 10,
+      "out": {
+        "start": 239,
+        "count": 2
+      },
+      "in": {
+        "start": 241,
+        "count": 3
+      }
+    },
+    "bob": {
+      "name": "Head bob",
+      "kind": "rest",
+      "start": 168,
+      "count": 8,
+      "fps": 8,
+      "out": {
+        "start": 244,
+        "count": 2
+      },
+      "in": {
+        "start": 246,
+        "count": 3
+      }
     },
     "idle": {
-      "start": 16,
+      "name": "Idle",
+      "kind": "rest",
+      "start": 176,
       "count": 8,
-      "fps": 5
+      "fps": 5,
+      "out": {
+        "start": 249,
+        "count": 2
+      },
+      "in": {
+        "start": 251,
+        "count": 3
+      }
     }
   },
   "cats": [
@@ -19,31 +226,78 @@
       "id": "biscuit",
       "name": "Biscuit",
       "blurb": "Classic cream with a red collar and bell",
+      "signature": "swing",
       "dance": "Swing step"
     },
     {
       "id": "smokey",
       "name": "Smokey",
       "blurb": "Gray tabby in red headphones",
+      "signature": "shuffle",
       "dance": "Side shuffle"
     },
     {
       "id": "midnight",
       "name": "Midnight",
       "blurb": "Tuxedo cat in shades and a gold chain",
+      "signature": "kneeup",
       "dance": "Knee-up groove"
     },
     {
       "id": "pepper",
       "name": "Pepper",
       "blurb": "Calico with a pink bow",
+      "signature": "elbows",
       "dance": "Elbow bounce"
     },
     {
       "id": "mochi",
       "name": "Mochi",
       "blurb": "Siamese in a blue polka-dot bandana",
+      "signature": "stomp",
       "dance": "Party stomp"
+    },
+    {
+      "id": "ginger",
+      "name": "Ginger",
+      "blurb": "Orange tabby in a cozy striped scarf",
+      "signature": "twist",
+      "dance": "The twist"
+    },
+    {
+      "id": "snowball",
+      "name": "Snowball",
+      "blurb": "Fluffy white cat with a daisy behind the ear",
+      "signature": "wave",
+      "dance": "Hands in the air"
+    },
+    {
+      "id": "ash",
+      "name": "Ash",
+      "blurb": "Blue-gray gentleman in a red bow tie",
+      "signature": "disco",
+      "dance": "Disco point"
+    },
+    {
+      "id": "tortie",
+      "name": "Tortie",
+      "blurb": "Tortoiseshell in a mustard beanie",
+      "signature": "roof",
+      "dance": "Raise the roof"
+    },
+    {
+      "id": "bengal",
+      "name": "Bengal",
+      "blurb": "Spotted wild one in a party hat",
+      "signature": "stomp",
+      "dance": "Party stomp"
+    },
+    {
+      "id": "cocoa",
+      "name": "Cocoa",
+      "blurb": "Chocolate cat in cool shades",
+      "signature": "elbows",
+      "dance": "Elbow bounce"
     }
   ]
 }
