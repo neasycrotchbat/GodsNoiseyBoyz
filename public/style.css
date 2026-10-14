@@ -162,7 +162,7 @@ input:focus { border-color: var(--focus); outline: none; }
 .stage {
   grid-area: stage;
   position: relative;
-  overflow-x: hidden; /* big crowd cats at the edges hang off the sides */
+  overflow-x: hidden; /* big DJ cats at the edges hang off the sides */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -174,7 +174,7 @@ input:focus { border-color: var(--focus); outline: none; }
 .screen-wrap { padding: 0.8rem 16px 0; display: flex; justify-content: center; }
 .screen {
   position: relative;
-  width: min(100%, calc((100vh - 330px) * 1.78));
+  width: min(100%, calc((100vh - 370px) * 1.78));
   min-width: min(360px, 100%);
   aspect-ratio: 16 / 9;
   background: #000;
@@ -200,7 +200,7 @@ input:focus { border-color: var(--focus); outline: none; }
   --dj-s: 1.75; /* DJ cat scale, set by app.js from the seat width */
   position: relative;
   z-index: 2;
-  width: min(100%, calc((100vh - 330px) * 1.78 + 32px)); /* matches the screen */
+  width: min(100%, calc((100vh - 370px) * 1.78 + 32px)); /* matches the screen */
   min-width: min(392px, 100%);
   margin: calc(-88px * var(--dj-s) - 40px) auto 0; /* booth sits on the video's bottom edge */
   padding: 0 16px;
@@ -258,29 +258,18 @@ input:focus { border-color: var(--focus); outline: none; }
 }
 .platter { background-image: radial-gradient(circle, var(--neon) 0 3px, #1a1426 4px 8px, #2b2140 9px 10px, #1a1426 11px), linear-gradient(90deg, transparent 47%, rgba(255,255,255,.25) 47% 53%, transparent 53%); }
 
-/* The crowd overlaps the booth (heads over the decks) and is cut off at the
-   bottom like a concert foreground. --k scales it to the floor's width (set by
-   app.js); each row sets --row-s. */
-.crowd {
-  --k: 1;
+/* The dance floor: a three.js canvas (dancer.js) in front of and below the
+   booth. It fills whatever height the stage has left. */
+.floor {
   position: relative;
   z-index: 3;
-  flex: 1 0 auto;
-  min-height: calc(160px * var(--k));
-  margin-top: calc(-80px * var(--k));
-  overflow: clip; /* the front row is cut off at the floor's edge without adding scroll */
-  pointer-events: none;           /* never block the seats behind it */
+  flex: 1 1 auto;
+  min-height: 300px;
+  margin-top: -190px; /* the dancer stands in front of the booth, feet below it */
+  pointer-events: none; /* never block the seats behind it */
 }
-.fan { position: absolute; display: grid; justify-items: center; transform: translateX(-50%); }
-.crowd .cat { --s: calc(var(--row-s, 2) * var(--k)) !important; }
-/* NPCs get a hue tint (--tint) for variety; real people keep their true colours. */
-.crowd-row0 .cat { filter: hue-rotate(var(--tint, 0deg)) brightness(0.55) saturate(0.75); }
-.crowd-row1 .cat { filter: hue-rotate(var(--tint, 0deg)) brightness(0.75) saturate(0.88); }
-.crowd-row2.npc .cat { filter: hue-rotate(var(--tint, 0deg)) brightness(0.92); }
-.crowd-row0:not(.npc) .cat, .crowd-row1:not(.npc) .cat { --tint: 0deg; }
-.crowd .nametag { margin-bottom: calc(-10px * var(--k)); position: relative; z-index: 1; max-width: 96px; font-size: 0.75rem; }
-.crowd .fan.lift .nametag { margin-bottom: calc(14px * var(--k)); } /* neighbours' names sit at different heights */
-.crowd .nametag.me { color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+/* Absolute, so the canvas's own pixel size never feeds back into the layout. */
+.floor canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .nametag {
   font: 600 0.8rem var(--display);
   background: rgba(18, 14, 29, 0.85);

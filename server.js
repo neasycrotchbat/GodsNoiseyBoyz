@@ -18,7 +18,7 @@ const CONFIG_PATH = path.join(ROOT, 'config.json');
 if (!fs.existsSync(CONFIG_PATH)) fs.copyFileSync(path.join(ROOT, 'config.example.json'), CONFIG_PATH);
 const config = {
   siteName: "God's Noisey BoyZ", password: 'changeme', port: 3000,
-  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5, crowd: 24, bpmApiKey: '',
+  youtubeApiKey: '', maxDjs: 5, lameSkipFraction: 0.5, bpmApiKey: '',
   ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')),
 };
 const PORT = Number(process.env.PORT) || config.port;
@@ -126,7 +126,6 @@ app.get('/api/me', (req, res) => {
   const user = verify(readCookie(req.headers.cookie));
   res.json({
     siteName: config.siteName, user: publicUser(user), cats: CATS.cats, sprites: CATS, hasApiKey: !!config.youtubeApiKey,
-    crowd: Math.max(0, Math.min(40, Number(config.crowd) || 0)), // NPC cats on the dance floor
   });
 });
 

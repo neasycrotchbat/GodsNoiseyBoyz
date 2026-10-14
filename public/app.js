@@ -84,26 +84,11 @@
     skinWatcher.observe(n);
   }
 
-  // The NPC crowd is the same for everyone: skins and spots come from fixed seeds.
-  let npcs = [];
-  // Every avatar shows up in the crowd once before any repeats; repeats get a
-  // colour tint so they still look different. The order is shuffled the same
-  // way for everyone.
-  const NPC_TINTS = [28, -28, 55, -55, 90, -90, 140, -140];
-  function makeNpcs(count) {
-    const pick = Dance.seedRand('npc-wardrobe');
-    const order = CATS.map((c) => [pick(), c.id]).sort((a, b) => a[0] - b[0]).map(([, id]) => id);
-    return Array.from({ length: count }, (_, i) => {
-      const rand = Dance.seedRand('npc:' + i);
-      const repeat = Math.floor(i / order.length);
-      return {
-        id: 'npc:' + i,
-        skin: order[i % order.length],
-        tint: repeat ? NPC_TINTS[Math.floor(rand() * NPC_TINTS.length)] : 0,
-        row: i % 3, // 0 = back, 1 = middle, 2 = front (beside the real people)
-        jitter: (rand() - 0.5) * 3,
-      };
-    });
+  // The 3D dancer on the floor (dancer.js) stands in for you. Sprite reactions
+  // go to the seats and pickers; yours also go to the dancer.
+  function react(id, clip, ms, delay) {
+    Dance.react(id, clip, ms, delay);
+    if (me && id === me.id && window.Dancer && Dancer.react) Dancer.react(clip, ms, delay);
   }
 
   function catGrid(container, selected, onPick) {
@@ -133,10 +118,10 @@
     const res = await fetch('/api/me', { credentials: 'same-origin' });
     const info = await res.json();
     CATS = info.cats;
-    npcs = makeNpcs(info.crowd || 0);
     Dance.init(info.sprites);
     SPRITE_CLIPS = info.sprites.clips;
     Dance.now = () => songClock(); // dancing runs on the song as this player hears it
+    window.Dancer = Object.assign(window.Dancer || {}, { now: songClock });
     hasApiKey = info.hasApiKey;
     document.title = info.siteName;
     for (const n of document.querySelectorAll('[data-site-name]')) n.textContent = info.siteName;
@@ -237,7 +222,7 @@
     socket.on('chat', (m) => addChat(m, true));
     socket.on('emote', ({ userId, clip } = {}) => {
       const isMove = SPRITE_CLIPS[clip] && SPRITE_CLIPS[clip].kind === 'move';
-      Dance.react(userId, clip, barMs() * (isMove ? 2 : 1));
+      react(userId, clip, barMs() * (isMove ? 2 : 1));
     });
   }
 
@@ -263,7 +248,7 @@
   let prevLames = new Set();
   function roomReactions(prevKey, prevRoom, r) {
     const c = r.current;
-    const everyone = [...new Set([...r.listeners, ...r.djs, ...npcs.map((n) => n.id)])];
+    const everyone = [...new Set([...r.listeners, ...r.djs])];
     if (prevKey === undefined) { // just arrived: take the room as it is, no fanfare
       prevAwesomes = new Set(c ? c.awesomes : []);
       prevLames = new Set(c ? c.lames : []);
@@ -272,21 +257,21 @@
     if (lastSongKey !== prevKey) {
       for (const id of everyone) {
         const rand = Dance.seedRand(id + lastSongKey);
-        if (c) Dance.react(id, rand() < 0.5 ? 'jump' : 'cheer', 2000 + rand() * 700, rand() * 350);
-        else if (prevKey) Dance.react(id, 'clap', 2400, rand() * 300);
+        if (c) react(id, rand() < 0.5 ? 'jump' : 'cheer', 2000 + rand() * 700, rand() * 350);
+        else if (prevKey) react(id, 'clap', 2400, rand() * 300);
       }
       prevAwesomes = new Set();
       prevLames = new Set();
     }
     const now = new Set(c ? c.awesomes : []);
-    for (const id of now) if (!prevAwesomes.has(id)) Dance.react(id, 'cheer', 1300);
+    for (const id of now) if (!prevAwesomes.has(id)) react(id, 'cheer', 1300);
     prevAwesomes = now;
     // A Lame vote: thumbs down and a head shake, then they turn their back on the stage.
     const boos = new Set(c ? c.lames : []);
-    for (const id of boos) if (!prevLames.has(id)) Dance.react(id, 'boo', 1800);
+    for (const id of boos) if (!prevLames.has(id)) react(id, 'boo', 1800);
     prevLames = boos;
     for (const id of c ? c.snags : []) {
-      if (prevRoom && prevRoom.current && !prevRoom.current.snags.includes(id)) Dance.react(id, 'jump', 1000);
+      if (prevRoom && prevRoom.current && !prevRoom.current.snags.includes(id)) react(id, 'jump', 1000);
     }
   }
 
@@ -356,7 +341,13 @@
     spot.classList.toggle('on', spotIndex >= 0);
     if (spotIndex >= 0) spot.style.left = `calc(16px + (100% - 32px) * ${(spotIndex + 0.5) / room.maxDjs})`;
 
-    renderCrowd(c, awesomes, lames, snags);
+    // The dancer follows the song and your mood: dancing after an Awesome,
+    // sulking after a Lame, grooving along otherwise, idle between songs.
+    if (window.Dancer && Dancer.setSong) {
+      const beat = c && c.beat;
+      Dancer.setSong(c ? { key: lastSongKey, anchor: c.startedAt, bpm: beat && beat.bpm, offset: beat ? beat.offset : 0 } : null);
+      Dancer.setMode(awesomes.has(me.id) ? 'dance' : lames.has(me.id) ? 'sulk' : c ? 'groove' : 'chill');
+    }
 
     $('#online-count').textContent = `${room.listeners.length} here`;
     const inSeat = room.djs.includes(me.id);
@@ -366,78 +357,11 @@
     $('#btn-skip').hidden = !(c && c.djId === me.id);
   }
 
-  // The crowd: a concert audience seen from behind, facing the DJ booth, with
-  // the back rows' heads over the booth. Three rows, biggest in front; real
-  // people stand in the front row with their names over their heads, NPCs
-  // fill in around and behind them. Everything scales with the floor's width.
-  // Rows hang from the top of the crowd (just under the booth), so a tall
-  // window shows more legs rather than opening a gap below the booth.
-  const CROWD_ROWS = [
-    { s: 1.8, top: 4, spacing: 0.5 },    // back, heads over the decks, dimmest
-    { s: 2.2, top: 48, spacing: 0.55 },  // middle
-    { s: 2.7, top: 96, spacing: 0.6 },   // front, cut off by the floor's edge
-  ];
-  function renderCrowd(c, awesomes, lames, snags) {
-    const crowd = $('#crowd');
-    crowd.replaceChildren();
-    const width = crowd.clientWidth || 700;
-    const k = Math.max(0.42, Math.min(1.35, width / 760));
-    crowd.style.setProperty('--k', k.toFixed(3));
-    const cap = (row) => Math.max(1, Math.floor(width / (64 * CROWD_ROWS[row].s * k * CROWD_ROWS[row].spacing)));
-    // The more Awesomes a song gets, the more NPCs dance; Lames calm them down.
-    const hype = c ? Math.max(0.1, Math.min(0.85, 0.3 + 0.12 * c.awesomes.length - 0.1 * c.lames.length)) : 0;
-    const anchor = c ? c.startedAt : 0;
-
-    const fans = room.listeners.filter((id) => !room.djs.includes(id));
-    let people = 0;
-    for (let row = 0; row < CROWD_ROWS.length; row++) {
-      let members = npcs.filter((n) => n.row === row).map((n) => ({ npc: n, id: n.id }));
-      if (row === 2) members = [...fans.map((id) => ({ id })), ...members.slice(0, Math.max(0, cap(2) - fans.length))];
-      else members = members.slice(0, cap(row));
-      // Stable spots: ordered by id hash, so people don't hop around on every update.
-      members.sort((a, b) => hash(a.id) - hash(b.id));
-      members.forEach((m, i) => {
-        const fan = el('div', `fan crowd-row${row}` + (m.npc ? ' npc' : ''));
-        // Each row is shifted a little so heads line up in the gaps of the row in front.
-        const shift = row === 1 ? 0.25 : row === 0 ? -0.25 : 0;
-        const jitter = m.npc ? m.npc.jitter : (((hash(m.id) >>> 5) % 7) - 3) * 0.6;
-        const left = 3 + (94 * (i + 0.5 + shift)) / members.length + jitter;
-        fan.style.left = `${left}%`;
-        const x = Math.max(0, Math.min(1, left / 100)); // for the crowd wave
-        // People carry a name tag above their head; lift them so heads line up.
-        fan.style.top = `calc(${CROWD_ROWS[row].top}px * var(--k) - ${m.npc ? 0 : 16}px)`;
-        fan.style.zIndex = String(row * 10 + (m.npc ? 0 : 5));
-        fan.style.setProperty('--row-s', CROWD_ROWS[row].s);
-        if (m.npc) {
-          fan.setAttribute('aria-hidden', 'true');
-          fan.style.setProperty('--tint', m.npc.tint + 'deg');
-          const keen = c ? Dance.seedRand(m.id + c.startedAt)() : 1;
-          const mode = !c ? 'chill' : keen < hype ? 'dance' : 'groove';
-          fan.append(catNode(m.npc.skin, { mode, seed: m.id, anchor, face: 'stage', x }));
-        } else {
-          // Awesome voters dance, Lame voters sulk with their backs to the stage,
-          // everyone else grooves along (or chills between songs).
-          const id = m.id;
-          const mode = awesomes.has(id) ? 'dance' : lames.has(id) ? 'sulk' : c ? 'groove' : 'chill';
-          const tag = el('span', 'nametag' + (id === me.id ? ' me' : ''), userName(id) + (id === me.id ? ' (you)' : ''));
-          // Alternate people's name heights so neighbours' tags don't collide.
-          if (people++ % 2) fan.classList.add('lift');
-          fan.append(tag, catNode(userCat(id), { mode, seed: id, anchor, face: 'stage', x }));
-          let bubble = null;
-          if (snags.has(id)) bubble = ['Snag', 'bubble-snag'];
-          else if (awesomes.has(id)) bubble = ['Awesome', 'bubble-awesome'];
-          else if (lames.has(id)) bubble = ['Lame', 'bubble-lame'];
-          if (bubble) fan.append(el('span', 'bubble ' + bubble[1], bubble[0]));
-        }
-        crowd.append(fan);
-      });
-    }
-  }
-  // Re-fit the crowd when the window changes size.
-  let crowdFit = 0;
+  // Re-fit the seats when the window changes size.
+  let stageFit = 0;
   window.addEventListener('resize', () => {
-    clearTimeout(crowdFit);
-    crowdFit = setTimeout(() => { if (room && me) renderStage(); }, 150);
+    clearTimeout(stageFit);
+    stageFit = setTimeout(() => { if (room && me) renderStage(); }, 150);
   });
 
   function renderNow() {

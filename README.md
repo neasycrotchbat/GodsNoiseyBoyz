@@ -55,7 +55,6 @@ The free quota covers about 100 searches a day plus thousands of song lookups, w
 | `youtubeApiKey` | Optional, see above. |
 | `maxDjs` | DJ seats at the booth, default 5. |
 | `lameSkipFraction` | Share of listeners whose Lame votes skip a song, default 0.5. |
-| `crowd` | NPC cats on the dance floor, default 24 (0 turns them off, 40 max). Narrow screens show fewer. |
 | `bpmApiKey` | Optional GetSongBPM key for automatic song tempos, see below. |
 
 ## Optional: GetSongBPM key (automatic tempos)
@@ -95,7 +94,7 @@ Robots are drawn on the same skeleton as the cats (`draw_robot` in `make_cats.py
 
 **The stage:** the video fills the width of the stage, with the DJ booth standing in front of its lower edge, so the DJs dance in front of the big screen.
 
-**The crowd:** the dance floor is a concert crowd seen from behind, facing the DJ booth: three rows of big cats, the back rows' heads over the decks and the front row cut off at the waist. They turn around to face you now and then mid-dance. Real people stand in the front row with their names over their heads (yours in amber); NPC cats fill in around and behind them, dimmer the further back they are. Everyone sees the same crowd. They bob along during songs and cheer when a new one starts; the more Awesome votes a song gets, the more of them dance, and Lame votes calm them down. The whole scene scales to the width of the screen.
+**The dancer (work in progress):** the pixel crowd is gone. A 3D figure now stands on the floor under the booth, drawn with three.js: a plain silhouette for now, with placeholder moves that blend into each other and lock to the beat, dancing after you vote Awesome, sulking after a Lame, doing your emotes. It is built to run on motion-captured dance clips instead (see `tools/dancer/README.md`), and the plan is to grow it into a crowd.
 
 ## Regenerating the cat art
 

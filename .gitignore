@@ -3,3 +3,4 @@ data/
 config.json
 tools/cats/out/
 __pycache__/
+public/dancer/
