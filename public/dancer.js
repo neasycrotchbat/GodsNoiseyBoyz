@@ -19,7 +19,14 @@ import * as THREE from 'three';
 
 const REF_BEAT = 0.5; // clips are authored at 120 BPM: one beat is 0.5 s
 const FADE = 0.35;    // seconds to blend from one move into the next
-const CROWD = 60;     // how many figures stand behind you
+const CROWD = 64;     // how many figures stand around you
+// The camera sits just over the crowd's heads; you're in focus, and the rows
+// in front of and behind you soften with distance.
+const DOF = { focus: 5.6, aperture: 0.012, maxblur: 0.02, on: true };
+// Figures right under the camera: out of frame until they raise their hands.
+const FORE = [[-0.95, 4.2], [-0.3, 4.45], [0.4, 4.3], [1.0, 4.5]];
+// Rows between you and the camera, leaving a lane so you stay in view.
+const FRONT = [[-0.9, 1], [0.9, 1], [-1.8, 1], [1.8, 1], [-2.7, 1], [2.7, 1], [-1.15, 2], [1.15, 2], [-2.1, 2], [2.1, 2], [-1.5, 3], [1.5, 3]];
 // Which moves each mood draws from. A move repeated in a list is just more likely.
 const MOVES = {
   dance: ['bounce', 'roof', 'twist', 'step', 'pump', 'shuffle', 'kick', 'point', 'wave', 'sway', 'rock', 'disco', 'robot', 'turn', 'spin', 'turn'],
@@ -481,10 +488,11 @@ function makeDancer(idx, x, z, rand) {
   // The crowd lags the beat by a few ms each, so they move together, not in lockstep.
   return { idx, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, lag: idx ? 20 + rand() * 140 : 0 };
 }
-// Where the crowd stands: rows behind you, each as wide as the floor is in
-// view at that depth, filled from the middle out.
+// Where the crowd stands: the few under the camera, the rows in front of
+// you, then rows behind you, each as wide as the floor is in view at that
+// depth, filled from the middle out.
 function crowdSpots(count) {
-  const spots = [];
+  const spots = [...FORE, ...FRONT].map(([x, z]) => ({ x, z }));
   for (let r = 0; spots.length < count && r < 12; r++) {
     const z = -1.1 - 0.85 * r, w = 0.72 * (5.4 - z); // half the width in view at that depth
     const n = Math.floor((2 * w) / 0.9) + 1, x0 = -((n - 1) * 0.9) / 2 + (r % 2 ? 0.45 : 0);
@@ -510,8 +518,8 @@ function init() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
-  camera.position.set(0, 1.7, 5.4);
-  camera.lookAt(0, 0.8, -1);
+  camera.position.set(0, 2.4, 5.4);
+  camera.lookAt(0, 0.9, -1.5);
 
   // Stage lighting: a warm spot from the front, neon rims from behind so the
   // silhouettes have an edge, and a dim fill so nothing goes fully black.
@@ -527,7 +535,9 @@ function init() {
   rim.position.set(-2, 2.5, -3);
   const rim2 = new THREE.DirectionalLight(0xff5fb8, 2);
   rim2.position.set(2.5, 2, -2.5);
-  scene.add(rim, rim2);
+  const fill = new THREE.DirectionalLight(0x7a6ab8, 0.7); // from the camera, so the near figures aren't pure black
+  fill.position.set(0, 3, 6);
+  scene.add(rim, rim2, fill);
   // The floor only catches the shadows: the page shows through everywhere else.
   const floor = new THREE.Mesh(new THREE.CircleGeometry(12, 48), new THREE.ShadowMaterial({ opacity: 0.45 }));
   floor.rotation.x = -Math.PI / 2;
@@ -555,11 +565,16 @@ function init() {
     scene.add(p.mesh);
   }
 
+  setupDof();
   const fit = () => {
     const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    const px = renderer.getDrawingBufferSize(new THREE.Vector2());
+    dof.color.setSize(px.x, px.y);
+    dof.depth.setSize(px.x, px.y);
+    dof.mat.uniforms.aspect.value = w / h;
   };
   new ResizeObserver(fit).observe(canvas);
   fit();
@@ -704,6 +719,54 @@ function update(t, dt) {
     d.mixer.update(dt);
   }
 }
+// ------------------------------------------------------------ depth of field
+// The scene is drawn to a texture along with its depth, then put on the
+// canvas by a pass that blurs each pixel by how far it is from the focus
+// distance (a ring of 41 taps, wider the further out of focus). Tone mapping
+// and the sRGB conversion happen in that pass, and the page shows through
+// wherever nothing was drawn.
+let dof = null;
+function setupDof() {
+  const taps = [[0, 0]];
+  for (const [r, n] of [[0.4, 8], [0.7, 16], [1, 16]]) for (let i = 0; i < n; i++) taps.push([r * Math.cos((2 * Math.PI * i) / n), r * Math.sin((2 * Math.PI * i) / n)]);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      tColor: { value: null }, tDepth: { value: null }, cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
+      focus: { value: DOF.focus }, aperture: { value: DOF.aperture }, maxblur: { value: DOF.maxblur }, aspect: { value: 1 },
+    },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+      #include <common>
+      #include <packing>
+      uniform sampler2D tColor, tDepth;
+      uniform float cameraNear, cameraFar, focus, aperture, maxblur, aspect;
+      varying vec2 vUv;
+      void main() {
+        float depth = unpackRGBAToDepth(texture2D(tDepth, vUv));
+        float dist = -perspectiveDepthToViewZ(depth, cameraNear, cameraFar);
+        float coc = depth > 0.9999 ? 0.0 : clamp(abs(dist - focus) / dist * aperture, 0.0, maxblur);
+        vec2 r = vec2(coc / aspect, coc);
+        vec4 acc = vec4(0.0);
+        vec4 s;
+        ${taps.map(([x, y]) => `s = texture2D(tColor, vUv + vec2(${x.toFixed(4)}, ${y.toFixed(4)}) * r); acc += vec4(s.rgb * s.a, s.a);`).join('\n        ')}
+        gl_FragColor = vec4(acc.a > 0.0 ? acc.rgb / acc.a : vec3(0.0), acc.a / ${taps.length}.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        gl_FragColor.rgb *= gl_FragColor.a; // the canvas wants premultiplied alpha
+      }`,
+    blending: THREE.NoBlending, depthTest: false, depthWrite: false,
+  });
+  const color = new THREE.WebGLRenderTarget(1, 1, { samples: 4, type: THREE.HalfFloatType });
+  const depth = new THREE.WebGLRenderTarget(1, 1);
+  mat.uniforms.tColor.value = color.texture;
+  mat.uniforms.tDepth.value = depth.texture;
+  const quad = new THREE.Scene();
+  quad.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+  dof = { color, depth, mat, quad, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), depthMat: new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }) };
+  renderer.shadowMap.autoUpdate = false; // once per frame, in the colour pass, not again in the depth pass
+}
+Dancer.dof = (on = !DOF.on) => { DOF.on = on; };
+
 // Put every figure's parts where its joints are, then render.
 const partM = new THREE.Matrix4();
 function draw() {
@@ -712,7 +775,16 @@ function draw() {
     for (const d of dancers) p.mesh.setMatrixAt(d.idx, partM.multiplyMatrices(d.joints[p.joint].matrixWorld, p.local));
     p.mesh.instanceMatrix.needsUpdate = true;
   }
+  renderer.shadowMap.needsUpdate = true;
+  if (!DOF.on) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
+  renderer.setRenderTarget(dof.color);
   renderer.render(scene, camera);
+  scene.overrideMaterial = dof.depthMat;
+  renderer.setRenderTarget(dof.depth);
+  renderer.render(scene, camera);
+  scene.overrideMaterial = null;
+  renderer.setRenderTarget(null);
+  renderer.render(dof.quad, dof.cam);
 }
 function tick() {
   requestAnimationFrame(tick);
