@@ -8,8 +8,10 @@
    Dancer.now) and every clip is retimed so its beats land on the song's
    beats, phase-aligned, so the whole floor stays in step with what everyone
    hears. Each figure picks its own moves (seeded, so the same song gets the
-   same choreography on every screen) and lags the beat by a few milliseconds
-   of its own, so the crowd moves together without moving in lockstep.
+   same choreography on every screen), and each has its own timing (a little
+   ahead or behind, some on the off-beat), its own energy (how big it moves)
+   and its own handedness (half the crowd dances every move mirrored), so the
+   crowd moves together without moving in lockstep.
 
    The legs are never posed by hand: a pose says where the hips and the feet
    are, and the knees are solved to connect them, so the feet stay planted.
@@ -18,7 +20,10 @@
 import * as THREE from 'three';
 
 const REF_BEAT = 0.5; // clips are authored at 120 BPM: one beat is 0.5 s
-const FADE = 0.35;    // seconds to blend from one move into the next
+// Seconds to blend from one move into the next: half a beat, within reason.
+// A planned move starts blending in that long before its downbeat, so it has
+// arrived by the time the bar turns over, the way a dancer anticipates.
+const fadeFor = () => THREE.MathUtils.clamp((song ? song.beatMs : REF_BEAT * 1000) / 2000, 0.2, 0.45);
 const CROWD = 64;     // how many figures stand around you
 // The camera sits just over the crowd's heads; you're in focus, and the rows
 // in front of and behind you soften with distance.
@@ -191,7 +196,7 @@ const ROBOT = [
   { armL: [-45, 0, -60], foreL: [-120, 0, 0], armR: [-45, 0, 60], foreR: [-120, 0, 0], neck: [20, 0, 0], spine: [20, 0, 15] },
   { armL: [-90, 0, 0], foreL: [-90, 0, 0], armR: [-90, 0, 0], foreR: [0, 0, 90], neck: [-15, 0, 0], spine: [-5, -20, -25] },
 ];
-const ROBOT_FACE = (i) => (mod(i, 8) < 4 ? 70 : -70);
+const ROBOT_FACE = (i) => (mod(i, 8) < 3 ? 70 : mod(i, 8) < 6 ? -70 : 0); // one side, the other, then front so the loop and the next move start square
 // The turn: a half turn in four stepping beats, four beats grooving with your
 // back to the booth, a half turn on round, four beats facing front again.
 const TURN_YAW = yawLoop((b) => (b < 4 ? 45 * b : b < 8 ? 180 : b < 12 ? 180 + 45 * (b - 8) : 360), 16, 1);
@@ -426,17 +431,34 @@ const POSES = {
     hips: [0, 0, 0], spine: [15, 0, 2 * S(b, 8)], neck: [22, 6 * S(b, 8), 0],
     armL: [-8, 0, -6], foreL: [-8, 0, 0], armR: [-8, 0, 6], foreR: [-8, 0, 0],
   }) },
+  // Standing easy. Not a move: the crowd's lower-energy figures blend toward
+  // it a little, which makes everything they do smaller.
+  rest: { beats: 1, still: true, pose: () => ({ ...crouch(0.3), hips: [0, 0, 0], spine: [3, 0, 0], neck: [2, 0, 0], ...loose(0, 15) }) },
 };
+// The same pose for the other hand: left and right swap, and everything that
+// turns about the vertical or the front-to-back axis turns the other way.
+function mirrored(p) {
+  const flip = (r) => r && [r[0], -r[1], -r[2]];
+  const m = { ...p, x: -(p.x || 0), turn: -(p.turn || 0) };
+  for (const j of ['hips', 'spine', 'neck']) if (p[j]) m[j] = flip(p[j]);
+  for (const j of ['arm', 'fore']) { m[j + 'L'] = flip(p[j + 'R']); m[j + 'R'] = flip(p[j + 'L']); }
+  m.ankleL = p.ankleR && [-p.ankleR[0], p.ankleR[1], p.ankleR[2]];
+  m.ankleR = p.ankleL && [-p.ankleL[0], p.ankleL[1], p.ankleL[2]];
+  m.toesL = p.toesR == null ? undefined : -p.toesR;
+  m.toesR = p.toesL == null ? undefined : -p.toesL;
+  return m;
+}
 
 // Bake a pose function into a clip: 30 samples a second at the reference tempo.
-function bakeClip(name, { beats, pose }, fps = 30) {
+function bakeClip(name, { beats, pose }, mirror = false, fps = 30) {
   const n = Math.round(beats * REF_BEAT * fps);
   const times = [], pos = [], rot = {};
   for (const j of JOINTS) rot[j] = [];
   const e = new THREE.Euler();
   const hipPos = new THREE.Vector3(), target = new THREE.Vector3(), facing = new THREE.Quaternion();
   for (let i = 0; i <= n; i++) { // the last sample repeats the first so loops are seamless
-    const p = pose(((i % n) / n) * beats);
+    let p = pose(((i % n) / n) * beats);
+    if (mirror) p = mirrored(p);
     times.push(i / fps);
     facing.setFromAxisAngle(Y_UP, rad(p.turn || 0));
     hipPos.set(p.x || 0, HIP_Y + (p.y || 0), p.z || 0).applyQuaternion(facing);
@@ -462,7 +484,7 @@ function bakeClip(name, { beats, pose }, fps = 30) {
 
 // ------------------------------------------------------------ scene
 let renderer, scene, camera;
-const clips = {}, beatsOf = {}, onceOf = new Set();
+const clips = {}, clipsM = {}, beatsOf = {}, onceOf = new Set(); // clipsM: the same moves, mirrored
 const dancers = []; // [0] is you, the rest are the crowd
 let me = null, crowd = [];
 let song = null;     // { key, beatMs, beat0 }
@@ -479,14 +501,23 @@ function makeDancer(idx, x, z, rand) {
   const joints = {};
   for (const j of JOINTS) joints[j] = root.getObjectByName(j);
   const mixer = new THREE.AnimationMixer(root);
+  // What makes this one move differently from the next: the crowd is split
+  // between the two hands, each figure is a little early or late (a few on
+  // the off-beat or a whole beat out), and some move smaller than others.
+  const mirror = idx ? rand() < 0.5 : false;
+  const roll = idx ? rand() : 0;
+  const shift = !idx ? 0 : roll < 0.6 ? (rand() - 0.5) * 0.25 : roll < 0.85 ? 0.5 + (rand() - 0.5) * 0.2 : 1 + (rand() - 0.5) * 0.2;
+  const energy = idx ? 0.6 + rand() * 0.4 : 1;
   const actions = {};
-  for (const [name, clip] of Object.entries(clips)) {
+  for (const [name, clip] of Object.entries(mirror ? clipsM : clips)) {
     const a = mixer.clipAction(clip);
     if (onceOf.has(name)) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
     actions[name] = a;
   }
-  // The crowd lags the beat by a few ms each, so they move together, not in lockstep.
-  return { idx, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, lag: idx ? 20 + rand() * 140 : 0 };
+  // The mixer averages running actions by weight, so a standing-easy action
+  // left running at a fixed weight scales every move toward it.
+  if (energy < 1) { actions.rest.setEffectiveWeight(1 / energy - 1); actions.rest.play(); }
+  return { idx, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, shift, energy, mirror };
 }
 // Where the crowd stands: the few under the camera, the rows in front of
 // you, then rows behind you, each as wide as the floor is in view at that
@@ -546,6 +577,7 @@ function init() {
 
   for (const [name, def] of Object.entries(POSES)) {
     clips[name] = bakeClip(name, def);
+    clipsM[name] = bakeClip(name, def, true);
     beatsOf[name] = def.beats;
     if (def.once) onceOf.add(name);
   }
@@ -639,7 +671,7 @@ function schedule(d, name, ms, delay) {
 // Preview one move on loop (Dancer.show('twist') in the console; add true for
 // the whole floor); show() to stop.
 function show(clip, everyone = false) {
-  for (const d of everyone ? dancers : [me]) d.reaction = clips[clip] ? { name: clip, until: Infinity } : null;
+  for (const d of everyone || !clip ? dancers : [me]) d.reaction = clips[clip] ? { name: clip, until: Infinity } : null;
 }
 // Advance by s seconds and draw, for checking poses from the console.
 Dancer.step = (s) => { update(now(), s); draw(); };
@@ -681,7 +713,9 @@ function planFor(idx, key, m) {
   while (start < 4000) { // over 30 minutes of beats; the plan wraps after that
     let move;
     do move = pool[Math.floor(rand() * pool.length)]; while (move === last);
-    const beats = SEG[m] * (rand() < 0.5 ? 1 : 2);
+    // Whole loops of the move, so a turn or a spin ends where it started.
+    let beats = SEG[m] * (rand() < 0.5 ? 1 : 2);
+    beats = Math.ceil(beats / beatsOf[move]) * beatsOf[move];
     segs.push({ move, start, beats });
     start += beats;
     last = move;
@@ -690,32 +724,39 @@ function planFor(idx, key, m) {
   plans.set(id, plan);
   return plan;
 }
+// What a figure should be doing at time t: its reaction if one is running,
+// otherwise the planned move, looked up a fade ahead so the blend into the
+// next move finishes on that move's first downbeat. Returns the move and the
+// beat its segment starts on (so it plays from its own beginning), or no
+// start for a reaction, which just joins the beat wherever it is.
 function wanted(d, t) {
-  if (d.reaction && t < d.reaction.until) return d.reaction.name;
+  if (d.reaction && t < d.reaction.until) return { name: d.reaction.name };
   d.reaction = null;
   const { segs, total } = planFor(d.idx, song ? song.key : 'none', song ? d.mode : 'chill');
-  const beat = mod(beatAt(t), total);
+  const beat = mod(beatAt(t + fadeFor() * 1000), total);
   let seg = segs[0];
   for (const s of segs) { if (s.start > beat) break; seg = s; }
-  return seg.move;
+  return { name: seg.move, start: seg.start + Math.floor(beatAt(t + fadeFor() * 1000) / total) * total };
 }
 
 // Start a move now, blended from whatever is playing, in step with the song.
-function play(d, name, t) {
+function play(d, { name, start }, t) {
   const next = d.actions[name];
   next.reset();
   next.timeScale = speedOf(name);
-  if (!onceOf.has(name)) next.time = mod(beatAt(t), beatsOf[name]) * (clips[name].duration / beatsOf[name]);
+  const beats = beatsOf[name];
+  if (!onceOf.has(name)) next.time = mod(beatAt(t) - (start || 0), beats) * (clips[name].duration / beats);
   next.play();
-  if (d.current && d.current.action !== next) d.current.action.crossFadeTo(next, FADE, false);
+  if (d.current && d.current.action !== next) d.current.action.crossFadeTo(next, fadeFor(), false);
   d.current = { name, action: next };
 }
 
 function update(t, dt) {
+  const beatMs = song ? song.beatMs : REF_BEAT * 1000;
   for (const d of dancers) {
-    const td = t - d.lag;
-    const name = wanted(d, td);
-    if (!d.current || d.current.name !== name) play(d, name, td);
+    const td = t - d.shift * beatMs; // this figure's own idea of where the beat is
+    const w = wanted(d, td);
+    if (!d.current || d.current.name !== w.name) play(d, w, td);
     d.mixer.update(dt);
   }
 }
