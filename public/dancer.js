@@ -27,14 +27,18 @@ const ALIAS = { wave: 'cheer', disco: 'twist', robot: 'bounce' }; // emotes with
 const Dancer = Object.assign(window.Dancer || {}, { setSong, setMode, react, show, ready: false });
 window.Dancer = Dancer;
 
-// ------------------------------------------------------------ the silhouette
+/// ------------------------------------------------------------ the silhouette
 // A figure of capsules hung on named joints. Limbs hang along their joint's
 // -Y axis in the rest pose (arms by the sides, legs straight), so a joint's
 // rotation about X swings the limb forward (negative) and back, and about Z
 // swings it out to the side (negative for the left side).
 const SKIN = new THREE.MeshStandardMaterial({ color: 0x1b1430, roughness: 0.8, metalness: 0.1 });
-const JOINTS = ['hips', 'spine', 'neck', 'armL', 'foreL', 'armR', 'foreR', 'legL', 'shinL', 'legR', 'shinR'];
+const JOINTS = ['hips', 'spine', 'neck', 'armL', 'foreL', 'armR', 'foreR', 'legL', 'shinL', 'footL', 'legR', 'shinR', 'footR'];
 const HIP_Y = 0.95;
+const SOCKET = { x: 0.09, y: -0.02 }; // where each leg hangs from the hips
+const THIGH = 0.45, SHIN = 0.45;
+const ANKLE_Y = 0.03; // ankle height with the sole on the floor
+const STANCE = 0.12;  // how far out from centre each foot stands
 
 function joint(name, parent, x, y, z) {
   const o = new THREE.Object3D();
@@ -71,92 +75,144 @@ function buildSilhouette() {
     limb(arm, 0.05, 0.3);
     const fore = joint('fore' + side, arm, 0, -0.3, 0);
     limb(fore, 0.046, 0.32); // forearm and hand
-    const leg = joint('leg' + side, hips, s * 0.09, -0.02, 0);
-    limb(leg, 0.07, 0.45);
-    const shin = joint('shin' + side, leg, 0, -0.45, 0);
-    limb(shin, 0.055, 0.45);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.24), SKIN);
-    foot.position.set(0, -0.43, 0.06);
-    foot.castShadow = true;
-    shin.add(foot);
+    const leg = joint('leg' + side, hips, s * SOCKET.x, SOCKET.y, 0);
+    limb(leg, 0.07, THIGH);
+    const shin = joint('shin' + side, leg, 0, -THIGH, 0);
+    limb(shin, 0.055, SHIN);
+    const foot = joint('foot' + side, shin, 0, -SHIN, 0); // the ankle
+    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.24), SKIN);
+    sole.position.set(0, 0, 0.06);
+    sole.castShadow = true;
+    foot.add(sole);
   }
   return root;
 }
 
+// ------------------------------------------------------------ legs
+// The legs are never posed by hand. A pose says where the feet are (on the
+// floor unless it moves one) and where the hips are, and the knees are solved
+// to connect the two, so the body can sway, bounce, lean and twist on top of
+// planted feet instead of the legs swinging under it like a pendulum.
+const Y_UP = new THREE.Vector3(0, 1, 0);
+// The orientation of a limb pointing along dir, its front (local +Z) toward fwd.
+function limbQuat(dir, fwd) {
+  const y = dir.clone().negate();
+  const z = fwd.clone().addScaledVector(y, -fwd.dot(y)).normalize();
+  const x = new THREE.Vector3().crossVectors(y, z);
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+}
+// Rotations for one leg that put its ankle at target (a point in the room)
+// given where the hips are: the knee bends forward and a little out, and the
+// foot sits flat, turned by yaw degrees. Writes leg, shin and foot into out.
+function solveLeg(side, hipPos, hipQ, target, yaw, out) {
+  const s = side === 'L' ? -1 : 1;
+  const socket = new THREE.Vector3(s * SOCKET.x, SOCKET.y, 0).applyQuaternion(hipQ).add(hipPos);
+  const d = new THREE.Vector3().subVectors(target, socket);
+  const reach = THREE.MathUtils.clamp(d.length(), 0.1, THIGH + SHIN - 0.003); // out of reach: the foot comes up a touch
+  d.normalize();
+  const pole = new THREE.Vector3(s * 0.3, 0, 1).normalize(); // which way the knee points
+  // Law of cosines: how far the thigh swings off the hip-to-ankle line toward the knee's side.
+  const bend = Math.acos(THREE.MathUtils.clamp((THIGH * THIGH + reach * reach - SHIN * SHIN) / (2 * THIGH * reach), -1, 1));
+  const axis = new THREE.Vector3().crossVectors(d, pole).normalize();
+  const thighDir = d.clone().applyAxisAngle(axis, bend);
+  const knee = socket.clone().addScaledVector(thighDir, THIGH);
+  const shinDir = socket.clone().addScaledVector(d, reach).sub(knee).normalize();
+  const qThigh = limbQuat(thighDir, pole), qShin = limbQuat(shinDir, pole);
+  const qFoot = new THREE.Quaternion().setFromAxisAngle(Y_UP, THREE.MathUtils.degToRad(yaw));
+  out['leg' + side] = hipQ.clone().invert().multiply(qThigh);
+  out['shin' + side] = qThigh.clone().invert().multiply(qShin);
+  out['foot' + side] = qShin.clone().invert().multiply(qFoot);
+}
+
 // ------------------------------------------------------------ placeholder moves
 // Each pose function takes b, the position in beats through the clip, and
-// returns joint rotations in degrees [x, y, z] plus an offset of the hips.
-// They're periodic in the clip's length, so every loop is seamless.
+// returns joint rotations in degrees [x, y, z] for the body and arms, an
+// offset of the hips (x, y, z), and optionally where the ankles are (ankleL,
+// ankleR, points in the room; on the floor in a natural stance by default)
+// and how far the toes turn (toesL, toesR). They're periodic in the clip's
+// length, so every loop is seamless.
 const S = (b, per = 1, ph = 0) => Math.sin(2 * Math.PI * (b / per + ph));
 const C = (b, per = 1, ph = 0) => Math.cos(2 * Math.PI * (b / per + ph));
 const dip = (b) => (1 + C(b)) / 2; // a bounce that bottoms out on every beat
-// Knees bent by k (0 straight, 1 deep), with the hips dropping to match.
-const legs = (k) => ({ y: -0.075 * k, legL: [-22 * k, 0, 0], shinL: [46 * k, 0, 0], legR: [-22 * k, 0, 0], shinR: [46 * k, 0, 0] });
+// Hips lowered to bend the knees by k: 0 straight, 1 an easy bend, 2 a crouch.
+const crouch = (k) => ({ y: -0.075 * k });
+// An ankle for side s: out from its stance, up off the floor, forward.
+const ankle = (s, out = 0, up = 0, fwd = 0) => [s * (STANCE + out), ANKLE_Y + up, fwd];
 
 const POSES = {
   // Standing around between songs: breathing and shifting weight.
   idle: { beats: 4, pose: (b) => ({
-    ...legs(0.04 + 0.04 * C(b, 2)),
-    x: 0.025 * S(b, 4), hips: [0, 4 * S(b, 4), 2.5 * S(b, 4)],
+    ...crouch(0.08 + 0.04 * C(b, 2)),
+    x: 0.03 * S(b, 4), hips: [0, 4 * S(b, 4), 2.5 * S(b, 4)],
     spine: [2 + 1.5 * C(b, 2), -3 * S(b, 4), -2 * S(b, 4)], neck: [3 * C(b, 4, 0.25), 8 * S(b, 4, 0.1), 0],
     armL: [4 * S(b, 4), 0, -6], foreL: [-10 - 3 * C(b, 2), 0, 0], armR: [-4 * S(b, 4), 0, 6], foreR: [-10 - 3 * C(b, 2, 0.5), 0, 0],
   }) },
-  // Nodding along: a knee bounce on every beat, shoulders rocking every two.
+  // Nodding along: a knee bounce on every beat, weight rocking side to side every two.
   groove: { beats: 4, pose: (b) => { const d = dip(b), sw = S(b, 2); return {
-    ...legs(0.3 + 0.4 * d),
-    hips: [0, 6 * sw, 0], spine: [4 + 3 * d, -6 * sw, 4 * sw], neck: [10 * d - 4, 5 * sw, 0],
+    ...crouch(0.4 + 0.5 * d), x: 0.04 * sw,
+    hips: [0, 6 * sw, -3 * sw], spine: [4 + 3 * d, -6 * sw, 5 * sw], neck: [10 * d - 4, 5 * sw, 0],
     armL: [12 * sw, 0, -10], foreL: [-30 - 10 * d, 0, 0], armR: [-12 * sw, 0, 10], foreR: [-30 - 10 * d, 0, 0],
   }; } },
   // Big bounce with fists pumping.
   bounce: { beats: 2, pose: (b) => { const d = dip(b), sw = S(b, 2), pump = C(b); return {
-    ...legs(0.25 + 0.65 * d),
-    hips: [0, 10 * sw, 0], spine: [8 + 4 * d, -8 * sw, 0], neck: [12 * d - 6, 0, 0],
+    ...crouch(0.3 + 1.0 * d),
+    hips: [0, 8 * sw, 0], spine: [8 + 4 * d, -8 * sw, 0], neck: [12 * d - 6, 0, 0],
     armL: [-40 - 25 * pump, 0, -20], foreL: [-100, 0, 20], armR: [-40 + 25 * pump, 0, 20], foreR: [-100, 0, -20],
   }; } },
   // Raise the roof: both hands overhead, pushing up on the beat.
   roof: { beats: 4, pose: (b) => { const d = dip(b), push = (1 - C(b)) / 2, sw = S(b, 2); return {
-    ...legs(0.25 + 0.4 * d),
+    ...crouch(0.3 + 0.5 * d), x: 0.03 * sw,
     hips: [0, 5 * sw, 0], spine: [-4, 0, 3 * sw], neck: [-12, 0, 0],
     armL: [-20, 0, -160 + 8 * sw], foreL: [-55 * push, 0, 0], armR: [-20, 0, 160 + 8 * sw], foreR: [-55 * push, 0, 0],
   }; } },
-  // The twist: hips one way, shoulders the other, knees pumping double time.
+  // The twist: hips one way, shoulders the other, knees pumping double time,
+  // feet pivoting on the spot.
   twist: { beats: 4, pose: (b) => { const t = S(b, 2), d = dip(b * 2); return {
-    ...legs(0.3 + 0.35 * d),
-    hips: [0, 40 * t, 0], spine: [6, -30 * t, 0], neck: [4, -15 * t, 0],
+    ...crouch(0.4 + 0.45 * d),
+    hips: [0, 40 * t, 0], spine: [6, -30 * t, 0], neck: [4, -15 * t, 0], toesL: -6 + 20 * t, toesR: 6 + 20 * t,
     armL: [-10 + 15 * t, 0, -30], foreL: [-95, 0, 30], armR: [-10 - 15 * t, 0, 30], foreR: [-95, 0, -30],
   }; } },
-  // Step-touch: weight left for two beats, right for two, arms swinging across.
-  step: { beats: 4, pose: (b) => { const lean = S(b, 4), d = dip(b), sw = S(b, 2); return {
-    ...legs(0.2 + 0.35 * d), x: -0.14 * lean,
-    hips: [0, -8 * lean, -6 * lean], spine: [4, 10 * lean, 8 * lean], neck: [4, -6 * lean, -5 * lean],
-    armL: [-25 - 20 * sw, 0, -15], foreL: [-60, 0, 10], armR: [-25 + 20 * sw, 0, 15], foreR: [-60, 0, -10],
-  }; } },
+  // Step-touch: weight onto the left foot for two beats while the right taps
+  // in beside it on each beat, then the other way, arms swinging across.
+  step: { beats: 4, pose: (b) => {
+    const lean = S(b, 4), d = dip(b), sw = S(b, 2), lift = Math.abs(S(b, 2)); // lift is down on every beat
+    const onL = Math.max(0, lean), onR = Math.max(0, -lean); // how much weight is on that foot
+    return {
+      ...crouch(0.3 + 0.35 * d), x: -0.1 * lean,
+      hips: [0, -8 * lean, -6 * lean], spine: [4, 10 * lean, 8 * lean], neck: [4, -6 * lean, -5 * lean],
+      ankleR: ankle(1, -0.1 * onL, 0.08 * onL * lift, 0.03 * onL), ankleL: ankle(-1, -0.1 * onR, 0.08 * onR * lift, 0.03 * onR),
+      armL: [-25 - 20 * sw, 0, -15], foreL: [-60, 0, 10], armR: [-25 + 20 * sw, 0, 15], foreR: [-60, 0, -10],
+    };
+  } },
   // Reactions: arms up and waving, clapping, a jump (plays once), and booing.
   cheer: { beats: 2, pose: (b) => { const w = S(b), d = dip(b); return {
-    ...legs(0.1 + 0.2 * d),
+    ...crouch(0.15 + 0.3 * d),
     hips: [0, 0, 0], spine: [-6, 0, 4 * w], neck: [-15, 0, 0],
     armL: [-165, 0, -30 + 15 * w], foreL: [-20, 0, 15 * w], armR: [-165, 0, 30 + 15 * w], foreR: [-20, 0, 15 * w],
   }; } },
   clap: { beats: 2, pose: (b) => { const c = dip(b), d = dip(b); return {
-    ...legs(0.15 + 0.15 * d),
+    ...crouch(0.2 + 0.25 * d),
     hips: [0, 0, 0], spine: [6, 0, 0], neck: [8 * d, 0, 0],
     armL: [-45, 0, -25 + 28 * c], foreL: [-95, 0, 25 * c], armR: [-45, 0, 25 - 28 * c], foreR: [-95, 0, -25 * c],
   }; } },
   jump: { beats: 2, once: true, pose: (b) => {
     let k, air = 0;
-    if (b < 0.6) k = 0.2 + 0.8 * (b / 0.6);                            // crouch
-    else if (b < 1.4) { air = Math.sin(Math.PI * (b - 0.6) / 0.8); k = 0.3 * air; } // in the air, legs tucked
-    else k = 0.1 + 0.8 * (1 - (b - 1.4) / 0.6);                       // land and settle
-    const l = legs(k);
+    if (b < 0.6) k = 0.2 + 1.5 * (b / 0.6);                              // sink
+    else if (b < 1.4) {                                                   // push off and fly, legs tucked a little
+      air = Math.sin(Math.PI * (b - 0.6) / 0.8);
+      const e = Math.min(1, (b - 0.6) / 0.15);
+      k = 1.7 * (1 - e) + 0.6 * air * e;
+    } else k = 0.2 + 1.5 * Math.sin(Math.PI * (b - 1.4) / 0.6);          // land and absorb
+    const h = 0.45 * air;
     return {
-      ...l, y: l.y + 0.45 * air,
+      y: crouch(k).y + h, ankleL: ankle(-1, 0, h + 0.12 * air, -0.05 * air), ankleR: ankle(1, 0, h + 0.12 * air, -0.05 * air),
       hips: [0, 0, 0], spine: [8 * (1 - air) - 4 * air, 0, 0], neck: [-6 - 10 * air, 0, 0],
       armL: [-20 * (1 - air) + 20 * air, 0, -20 - 140 * air], foreL: [-30, 0, 0], armR: [-20 * (1 - air) + 20 * air, 0, 20 + 140 * air], foreR: [-30, 0, 0],
     };
   } },
   boo: { beats: 4, pose: (b) => ({
-    ...legs(0.08),
-    hips: [-4, 0, 0], spine: [-8, 0, 0], neck: [6, 18 * S(b), 0],
+    ...crouch(0.2), x: 0.04,
+    hips: [-4, 0, 3], spine: [-8, 0, -2], neck: [6, 18 * S(b), 0],
     armL: [-60, 0, 20], foreL: [-120, 0, 55], armR: [-60, 0, -20], foreR: [-120, 0, -55],
   }) },
 };
@@ -166,17 +222,25 @@ function bakeClip(name, { beats, pose }, fps = 30) {
   const n = Math.round(beats * REF_BEAT * fps);
   const times = [], pos = [], rot = {};
   for (const j of JOINTS) rot[j] = [];
-  const e = new THREE.Euler(), q = new THREE.Quaternion(), rad = THREE.MathUtils.degToRad;
+  const e = new THREE.Euler(), rad = THREE.MathUtils.degToRad;
+  const hipPos = new THREE.Vector3(), target = new THREE.Vector3();
   for (let i = 0; i <= n; i++) { // the last sample repeats the first so loops are seamless
     const p = pose(((i % n) / n) * beats);
     times.push(i / fps);
-    pos.push(p.x || 0, HIP_Y + (p.y || 0), p.z || 0);
+    hipPos.set(p.x || 0, HIP_Y + (p.y || 0), p.z || 0);
+    pos.push(hipPos.x, hipPos.y, hipPos.z);
+    const q = {};
     for (const j of JOINTS) {
       const r = p[j] || [0, 0, 0];
       e.set(rad(r[0]), rad(r[1]), rad(r[2]));
-      q.setFromEuler(e);
-      rot[j].push(q.x, q.y, q.z, q.w);
+      q[j] = new THREE.Quaternion().setFromEuler(e);
     }
+    for (const side of ['L', 'R']) {
+      const s = side === 'L' ? -1 : 1;
+      target.fromArray(p['ankle' + side] || ankle(s));
+      solveLeg(side, hipPos, q.hips, target, p['toes' + side] ?? s * 6, q);
+    }
+    for (const j of JOINTS) rot[j].push(q[j].x, q[j].y, q[j].z, q[j].w);
   }
   const tracks = [new THREE.VectorKeyframeTrack('hips.position', times, pos)];
   for (const j of JOINTS) tracks.push(new THREE.QuaternionKeyframeTrack(j + '.quaternion', times, rot[j]));
