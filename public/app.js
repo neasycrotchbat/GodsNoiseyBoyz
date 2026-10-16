@@ -84,11 +84,12 @@
     skinWatcher.observe(n);
   }
 
-  // The 3D dancer on the floor (dancer.js) stands in for you. Sprite reactions
-  // go to the seats and pickers; yours also go to the dancer.
+  // The 3D floor (dancer.js): the front figure stands in for you, the rest are
+  // the crowd. Sprite reactions go to the seats and pickers; yours also go to
+  // your figure, and everyone else's ripple through the crowd.
   function react(id, clip, ms, delay) {
     Dance.react(id, clip, ms, delay);
-    if (me && id === me.id && window.Dancer && Dancer.react) Dancer.react(clip, ms, delay);
+    if (window.Dancer && Dancer.react) Dancer.react(clip, ms, delay, me && id === me.id ? 'me' : 'crowd');
   }
 
   function catGrid(container, selected, onPick) {
@@ -341,12 +342,14 @@
     spot.classList.toggle('on', spotIndex >= 0);
     if (spotIndex >= 0) spot.style.left = `calc(16px + (100% - 32px) * ${(spotIndex + 0.5) / room.maxDjs})`;
 
-    // The dancer follows the song and your mood: dancing after an Awesome,
-    // sulking after a Lame, grooving along otherwise, idle between songs.
+    // The floor follows the song and the mood: your figure dances after an
+    // Awesome, sulks after a Lame, grooves along otherwise and idles between
+    // songs; the crowd follows the room's votes.
     if (window.Dancer && Dancer.setSong) {
       const beat = c && c.beat;
       Dancer.setSong(c ? { key: lastSongKey, anchor: c.startedAt, bpm: beat && beat.bpm, offset: beat ? beat.offset : 0 } : null);
       Dancer.setMode(awesomes.has(me.id) ? 'dance' : lames.has(me.id) ? 'sulk' : c ? 'groove' : 'chill');
+      Dancer.setRoom({ people: room.listeners.length, awesome: awesomes.size, lame: lames.size });
     }
 
     $('#online-count').textContent = `${room.listeners.length} here`;

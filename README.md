@@ -94,7 +94,7 @@ Robots are drawn on the same skeleton as the cats (`draw_robot` in `make_cats.py
 
 **The stage:** the video fills the width of the stage, with the DJ booth standing in front of its lower edge, so the DJs dance in front of the big screen.
 
-**The dancer (work in progress):** the pixel crowd is gone. A 3D figure now stands on the floor under the booth, drawn with three.js: a plain silhouette for now, with placeholder moves that blend into each other and lock to the beat, dancing after you vote Awesome, sulking after a Lame, doing your emotes. It is built to run on motion-captured dance clips instead (see `tools/dancer/README.md`), and the plan is to grow it into a crowd.
+**The floor (work in progress):** the pixel crowd is gone. A 3D crowd of silhouettes stands on the floor in front of the booth, drawn with three.js; the figure at the front is you. Every move is hand-built on a jointed figure whose feet stay planted (the knees are solved to connect hips and feet), and the moves blend into each other and lock to the beat: a couple of dozen of them, from idling with a phone to the running man, the robot and the disco point. Your figure dances after you vote Awesome, sulks after a Lame, grooves along otherwise and does your emotes; the crowd follows the room's votes (more Awesomes, more of them dance) and joins in with other people's emotes, each figure a few milliseconds behind the beat in its own way. Console helpers for tuning: `Dancer.show('twist')` (add `true` for the whole floor), `Dancer.moves()`, `Dancer.step(0.1)`, `Dancer.state()`. A motion-capture pipeline was sketched in `tools/dancer/README.md` and is parked for now.
 
 ## Regenerating the cat art
 
