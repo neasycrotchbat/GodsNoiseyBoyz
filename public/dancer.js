@@ -20,14 +20,15 @@
 import * as THREE from 'three';
 
 const REF_BEAT = 0.5; // clips are authored at 120 BPM: one beat is 0.5 s
-// Seconds to blend from one move into the next: half a beat, within reason.
-// A planned move starts blending in that long before its downbeat, so it has
-// arrived by the time the bar turns over, the way a dancer anticipates.
-const fadeFor = () => THREE.MathUtils.clamp((song ? song.beatMs : REF_BEAT * 1000) / 2000, 0.2, 0.45);
+// A planned move starts blending in this many beats before its downbeat, so
+// it has arrived by the time the bar turns over, the way a dancer
+// anticipates. How long the blend itself takes depends on how far apart the
+// two poses are (see fadeInto).
+const LEAD = 0.75;
 const CROWD = 64;     // how many figures stand around you
-// The camera sits just over the crowd's heads; you're in focus, and the rows
-// in front of and behind you soften with distance.
-const DOF = { focus: 5.6, aperture: 0.012, maxblur: 0.02, on: true };
+// The camera sits just over the crowd's heads. Everything from you back is
+// sharp; what's nearer the camera than you softens the closer it gets.
+const DOF = { focus: 5.2, aperture: 0.02, maxblur: 0.02, on: true };
 // Figures right under the camera: out of frame until they raise their hands.
 const FORE = [[-0.95, 4.2], [-0.3, 4.45], [0.4, 4.3], [1.0, 4.5]];
 // Rows between you and the camera, leaving a lane so you stay in view.
@@ -57,7 +58,13 @@ window.Dancer = Dancer;
 // swings it out to the side (negative for the left side). Each figure has its
 // own skeleton of plain Object3Ds; the parts themselves are drawn once for
 // the whole crowd (see PARTS).
-const JOINTS = ['hips', 'spine', 'neck', 'armL', 'foreL', 'armR', 'foreR', 'legL', 'shinL', 'footL', 'legR', 'shinR', 'footR'];
+const UPPER = ['hips', 'spine', 'neck', 'armL', 'foreL', 'armR', 'foreR']; // animated by the clips
+const LEGS = ['legL', 'shinL', 'footL', 'legR', 'shinR', 'footR'];          // solved every frame
+const JOINTS = [...UPPER, ...LEGS];
+// Besides the joints, each skeleton carries three marks the clips animate
+// and the leg solver reads: which way the figure faces, and where each ankle
+// should be (position) and point (rotation), in the figure's own space.
+const MARKS = ['facing', 'ankleL', 'ankleR'];
 const HIP_Y = 0.95;
 const SOCKET = { x: 0.09, y: -0.02 }; // where each leg hangs from the hips
 const THIGH = 0.45, SHIN = 0.45;
@@ -84,6 +91,7 @@ function buildSkeleton() {
     const shin = joint('shin' + side, leg, 0, -THIGH, 0);
     joint('foot' + side, shin, 0, -SHIN, 0); // the ankle
   }
+  for (const m of MARKS) joint(m, root, 0, 0, 0);
   return root;
 }
 // The body parts: a geometry, the joint it hangs on, and where it sits on it.
@@ -110,37 +118,43 @@ for (const p of PARTS) {
 // A pose says where the feet are (on the floor unless it moves one) and where
 // the hips are, and the knees are solved to connect the two, so the body can
 // sway, bounce, lean and twist on top of planted feet instead of the legs
-// swinging under it like a pendulum.
+// swinging under it like a pendulum. The solve runs every frame, after the
+// mixer has blended the hips and the ankle marks, so it holds across blends
+// between moves too (see legs()).
 const Y_UP = new THREE.Vector3(0, 1, 0);
+const _socket = new THREE.Vector3(), _d = new THREE.Vector3(), _pole = new THREE.Vector3(), _axis = new THREE.Vector3();
+const _thigh = new THREE.Vector3(), _knee = new THREE.Vector3(), _shin = new THREE.Vector3();
+const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _m = new THREE.Matrix4();
+const _qThigh = new THREE.Quaternion(), _qShin = new THREE.Quaternion();
 // The orientation of a limb pointing along dir, its front (local +Z) toward fwd.
-function limbQuat(dir, fwd) {
-  const y = dir.clone().negate();
-  const z = fwd.clone().addScaledVector(y, -fwd.dot(y)).normalize();
-  const x = new THREE.Vector3().crossVectors(y, z);
-  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+function limbQuat(dir, fwd, out) {
+  _y.copy(dir).negate();
+  _z.copy(fwd).addScaledVector(_y, -fwd.dot(_y)).normalize();
+  _x.crossVectors(_y, _z);
+  return out.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
 }
-// Rotations for one leg that put its ankle at target (a point in the room)
-// given where the hips are: the knee bends forward (the way the body faces,
-// facing) and a little out, and the foot sits flat, turned by yaw degrees.
-// Writes leg, shin and foot into out.
-function solveLeg(side, hipPos, hipQ, target, yaw, facing, out) {
+// Pose one leg of the skeleton j so its ankle sits at target (in the
+// figure's space) given where its hips are: the knee bends forward (the way
+// the figure faces) and a little out, and the foot turns as yawQ says.
+function solveLeg(j, side, target, yawQ, facing) {
   const s = side === 'L' ? -1 : 1;
-  const socket = new THREE.Vector3(s * SOCKET.x, SOCKET.y, 0).applyQuaternion(hipQ).add(hipPos);
-  const d = new THREE.Vector3().subVectors(target, socket);
-  const reach = THREE.MathUtils.clamp(d.length(), 0.1, THIGH + SHIN - 0.003); // out of reach: the foot comes up a touch
-  d.normalize();
-  const pole = new THREE.Vector3(s * 0.3, 0, 1).normalize().applyQuaternion(facing); // which way the knee points
+  const hipQ = j.hips.quaternion;
+  _socket.set(s * SOCKET.x, SOCKET.y, 0).applyQuaternion(hipQ).add(j.hips.position);
+  _d.subVectors(target, _socket);
+  const reach = THREE.MathUtils.clamp(_d.length(), 0.1, THIGH + SHIN - 0.003); // out of reach: the foot comes up a touch
+  _d.normalize();
+  _pole.set(s * 0.3, 0, 1).normalize().applyQuaternion(facing); // which way the knee points
   // Law of cosines: how far the thigh swings off the hip-to-ankle line toward the knee's side.
   const bend = Math.acos(THREE.MathUtils.clamp((THIGH * THIGH + reach * reach - SHIN * SHIN) / (2 * THIGH * reach), -1, 1));
-  const axis = new THREE.Vector3().crossVectors(d, pole).normalize();
-  const thighDir = d.clone().applyAxisAngle(axis, bend);
-  const knee = socket.clone().addScaledVector(thighDir, THIGH);
-  const shinDir = socket.clone().addScaledVector(d, reach).sub(knee).normalize();
-  const qThigh = limbQuat(thighDir, pole), qShin = limbQuat(shinDir, pole);
-  const qFoot = new THREE.Quaternion().setFromAxisAngle(Y_UP, THREE.MathUtils.degToRad(yaw));
-  out['leg' + side] = hipQ.clone().invert().multiply(qThigh);
-  out['shin' + side] = qThigh.clone().invert().multiply(qShin);
-  out['foot' + side] = qShin.clone().invert().multiply(qFoot);
+  _axis.crossVectors(_d, _pole).normalize();
+  _thigh.copy(_d).applyAxisAngle(_axis, bend);
+  _knee.copy(_socket).addScaledVector(_thigh, THIGH);
+  _shin.copy(_socket).addScaledVector(_d, reach).sub(_knee).normalize();
+  limbQuat(_thigh, _pole, _qThigh);
+  limbQuat(_shin, _pole, _qShin);
+  j['leg' + side].quaternion.copy(hipQ).invert().multiply(_qThigh);
+  j['shin' + side].quaternion.copy(_qThigh).invert().multiply(_qShin);
+  j['foot' + side].quaternion.copy(_qShin).invert().multiply(yawQ);
 }
 
 // ------------------------------------------------------------ the moves
@@ -454,35 +468,42 @@ function mirrored(p) {
 }
 
 // Bake a pose function into a clip: 30 samples a second at the reference tempo.
+// The clip animates the hips and upper body, the facing, and the ankle marks;
+// the legs are solved from those at run time.
 function bakeClip(name, { beats, pose }, mirror = false, fps = 30) {
   const n = Math.round(beats * REF_BEAT * fps);
-  const times = [], pos = [], rot = {};
-  for (const j of JOINTS) rot[j] = [];
-  const e = new THREE.Euler();
+  const times = [], pos = [], face = [], rot = {}, ank = { L: [], R: [] }, yaw = { L: [], R: [] };
+  for (const j of UPPER) rot[j] = [];
+  const e = new THREE.Euler(), q = new THREE.Quaternion();
   const hipPos = new THREE.Vector3(), target = new THREE.Vector3(), facing = new THREE.Quaternion();
   for (let i = 0; i <= n; i++) { // the last sample repeats the first so loops are seamless
     let p = pose(((i % n) / n) * beats);
     if (mirror) p = mirrored(p);
     times.push(i / fps);
     facing.setFromAxisAngle(Y_UP, rad(p.turn || 0));
+    face.push(facing.x, facing.y, facing.z, facing.w);
     hipPos.set(p.x || 0, HIP_Y + (p.y || 0), p.z || 0).applyQuaternion(facing);
     pos.push(hipPos.x, hipPos.y, hipPos.z);
-    const q = {};
-    for (const j of JOINTS) {
+    for (const j of UPPER) {
       const r = p[j] || [0, 0, 0];
-      e.set(rad(r[0]), rad(r[1]), rad(r[2]));
-      q[j] = new THREE.Quaternion().setFromEuler(e);
+      q.setFromEuler(e.set(rad(r[0]), rad(r[1]), rad(r[2])));
+      if (j === 'hips') q.premultiply(facing);
+      rot[j].push(q.x, q.y, q.z, q.w);
     }
-    q.hips.premultiply(facing);
     for (const side of ['L', 'R']) {
       const s = side === 'L' ? -1 : 1;
       target.fromArray(p['ankle' + side] || ankle(s)).applyQuaternion(facing);
-      solveLeg(side, hipPos, q.hips, target, (p['toes' + side] ?? s * 6) + (p.turn || 0), facing, q);
+      ank[side].push(target.x, target.y, target.z);
+      q.setFromAxisAngle(Y_UP, rad((p['toes' + side] ?? s * 6) + (p.turn || 0)));
+      yaw[side].push(q.x, q.y, q.z, q.w);
     }
-    for (const j of JOINTS) rot[j].push(q[j].x, q[j].y, q[j].z, q[j].w);
   }
-  const tracks = [new THREE.VectorKeyframeTrack('hips.position', times, pos)];
-  for (const j of JOINTS) tracks.push(new THREE.QuaternionKeyframeTrack(j + '.quaternion', times, rot[j]));
+  const tracks = [new THREE.VectorKeyframeTrack('hips.position', times, pos), new THREE.QuaternionKeyframeTrack('facing.quaternion', times, face)];
+  for (const j of UPPER) tracks.push(new THREE.QuaternionKeyframeTrack(j + '.quaternion', times, rot[j]));
+  for (const side of ['L', 'R']) {
+    tracks.push(new THREE.VectorKeyframeTrack('ankle' + side + '.position', times, ank[side]));
+    tracks.push(new THREE.QuaternionKeyframeTrack('ankle' + side + '.quaternion', times, yaw[side]));
+  }
   return new THREE.AnimationClip(name, -1, tracks);
 }
 
@@ -506,7 +527,7 @@ function makeDancer(idx, x, z, rand, kind) {
   root.rotation.y = isCrowd ? rad(rand() * 30 - 15) : 0;
   root.scale.setScalar(isCrowd ? 0.88 + rand() * 0.14 : 1);
   const joints = {};
-  for (const j of JOINTS) joints[j] = root.getObjectByName(j);
+  for (const j of [...JOINTS, ...MARKS]) joints[j] = root.getObjectByName(j);
   const mixer = new THREE.AnimationMixer(root);
   // What makes one crowd figure move differently from the next: the crowd is
   // split between the two hands, each figure is a little early or late (a few
@@ -525,7 +546,8 @@ function makeDancer(idx, x, z, rand, kind) {
   // The mixer averages running actions by weight, so a standing-easy action
   // left running at a fixed weight scales every move toward it.
   if (energy < 1) { actions.rest.setEffectiveWeight(1 / energy - 1); actions.rest.play(); }
-  return { idx, kind, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, shift, energy, mirror, active: kind !== 'user' };
+  const foot = (s) => ({ at: new THREE.Vector3(s * STANCE, ANKLE_Y, 0), from: new THREE.Vector3(), stepping: false, k: 0 });
+  return { idx, kind, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, fade: null, feet: { L: foot(-1), R: foot(1) }, shift, energy, mirror, active: kind !== 'user' };
 }
 // Where the crowd stands: the few under the camera, the rows in front of
 // you, then rows behind you, each as wide as the floor is in view at that
@@ -806,22 +828,87 @@ function wanted(d, t) {
   if (d.reaction && t < d.reaction.until) return { name: d.reaction.name };
   d.reaction = null;
   const { segs, total } = planFor(d.idx, song ? song.key : 'none', song ? d.mode : 'chill');
-  const beat = mod(beatAt(t + fadeFor() * 1000), total);
+  const ahead = beatAt(t + LEAD * (song ? song.beatMs : REF_BEAT * 1000));
+  const beat = mod(ahead, total);
   let seg = segs[0];
   for (const s of segs) { if (s.start > beat) break; seg = s; }
-  return { name: seg.move, start: seg.start + Math.floor(beatAt(t + fadeFor() * 1000) / total) * total };
+  return { name: seg.move, start: seg.start + Math.floor(ahead / total) * total };
+}
+
+// ---- transitions
+// How far a figure's upper body is from where the clip would put it at the
+// action's current time: joint angles in radians, plus the hips' travel.
+const _gq = new THREE.Quaternion(), _gv = new THREE.Vector3();
+const samplers = new Map(); // clip -> an interpolant per track, for reading a clip at any time
+function poseGap(d, action) {
+  const clip = action.getClip();
+  if (!samplers.has(clip)) {
+    const s = {};
+    for (const tr of clip.tracks) s[tr.name] = tr.createInterpolant();
+    samplers.set(clip, s);
+  }
+  const at = samplers.get(clip), t = action.time;
+  let gap = 0;
+  for (const j of UPPER) {
+    _gq.fromArray(at[j + '.quaternion'].evaluate(t));
+    gap += 2 * Math.acos(Math.min(1, Math.abs(_gq.dot(d.joints[j].quaternion))));
+  }
+  return gap + 3 * _gv.fromArray(at['hips.position'].evaluate(t)).distanceTo(d.joints.hips.position);
+}
+// Seconds to blend into an action: longer the further the pose has to
+// travel, up to maxBeats (the lead for a planned move, less for a reaction,
+// which has to be seen to happen now).
+function fadeInto(d, action, maxBeats) {
+  const beatMs = song ? song.beatMs : REF_BEAT * 1000;
+  const beats = THREE.MathUtils.clamp(0.3 + 0.08 * poseGap(d, action), 0.3, maxBeats);
+  return THREE.MathUtils.clamp((beats * beatMs) / 1000, 0.15, 0.7);
 }
 
 // Start a move now, blended from whatever is playing, in step with the song.
+// The blend is driven by hand (see update) so it can ease in and out.
 function play(d, { name, start }, t) {
   const next = d.actions[name];
+  if (d.fade) { d.fade.from.stop(); d.fade.from.setEffectiveWeight(1); d.fade = null; } // cut short: drop what was fading out
   next.reset();
   next.timeScale = speedOf(name);
   const beats = beatsOf[name];
   if (!onceOf.has(name)) next.time = mod(beatAt(t) - (start || 0), beats) * (clips[name].duration / beats);
   next.play();
-  if (d.current && d.current.action !== next) d.current.action.crossFadeTo(next, fadeFor(), false);
+  if (d.current && d.current.action !== next) {
+    const from = d.current.action, w0 = from.getEffectiveWeight();
+    d.fade = { from, to: next, w0, k: 0, dur: fadeInto(d, next, start === undefined ? 0.5 : LEAD) };
+    next.setEffectiveWeight(1 - w0);
+  } else next.setEffectiveWeight(1);
   d.current = { name, action: next };
+}
+
+// ---- feet
+// Both legs are solved from the blended hips and ankle marks. A planted foot
+// holds its spot on the floor: when a blend between moves (or a low-energy
+// figure's easing toward rest) would drag it somewhere else, it takes a step
+// there instead of sliding.
+const STEP = 0.22; // seconds a step takes
+const _mark = new THREE.Vector3();
+function legs(d, dt) {
+  const j = d.joints;
+  for (const side of ['L', 'R']) {
+    const mark = j['ankle' + side], f = d.feet[side];
+    _mark.copy(mark.position);
+    if (_mark.y > ANKLE_Y + 0.015) { // lifted by the move: follow it, and land wherever it comes down
+      f.stepping = false;
+      f.at.copy(_mark);
+    } else if (f.stepping) {
+      f.k = Math.min(1, f.k + dt / STEP);
+      f.at.lerpVectors(f.from, _mark, smooth(f.k));
+      f.at.y = _mark.y + 0.05 * Math.sin(Math.PI * f.k);
+      if (f.k >= 1) { f.stepping = false; f.at.copy(_mark); }
+    } else if (Math.hypot(_mark.x - f.at.x, _mark.z - f.at.z) > 0.025) { // being dragged: step instead
+      f.stepping = true;
+      f.k = 0;
+      f.from.copy(f.at);
+    } else f.at.y = _mark.y; // hold the spot
+    solveLeg(j, side, f.at, mark.quaternion, j.facing.quaternion);
+  }
 }
 
 function update(t, dt) {
@@ -831,7 +918,16 @@ function update(t, dt) {
     const td = t - d.shift * beatMs; // this figure's own idea of where the beat is
     const w = wanted(d, td);
     if (!d.current || d.current.name !== w.name) play(d, w, td);
+    if (d.fade) { // ease the old move out and the new one in
+      const f = d.fade;
+      f.k = Math.min(1, f.k + dt / f.dur);
+      const s = smooth(f.k);
+      f.from.setEffectiveWeight(f.w0 * (1 - s));
+      f.to.setEffectiveWeight(1 - f.w0 * (1 - s));
+      if (f.k >= 1) { f.from.stop(); f.from.setEffectiveWeight(1); d.fade = null; }
+    }
     d.mixer.update(dt);
+    legs(d, dt);
   }
 }
 // ------------------------------------------------------------ depth of field
@@ -859,7 +955,7 @@ function setupDof() {
       void main() {
         float depth = unpackRGBAToDepth(texture2D(tDepth, vUv));
         float dist = -perspectiveDepthToViewZ(depth, cameraNear, cameraFar);
-        float coc = depth > 0.9999 ? 0.0 : clamp(abs(dist - focus) / dist * aperture, 0.0, maxblur);
+        float coc = depth > 0.9999 || dist >= focus ? 0.0 : clamp((focus - dist) / dist * aperture, 0.0, maxblur);
         vec2 r = vec2(coc / aspect, coc);
         vec4 acc = vec4(0.0);
         vec4 s;
