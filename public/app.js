@@ -89,7 +89,7 @@
   // your figure, and everyone else's ripple through the crowd.
   function react(id, clip, ms, delay) {
     Dance.react(id, clip, ms, delay);
-    if (window.Dancer && Dancer.react) Dancer.react(clip, ms, delay, me && id === me.id ? 'me' : 'crowd');
+    if (window.Dancer && Dancer.react) Dancer.react(clip, ms, delay, me && id === me.id ? 'me' : id);
   }
 
   function catGrid(container, selected, onPick) {
@@ -350,6 +350,10 @@
       Dancer.setSong(c ? { key: lastSongKey, anchor: c.startedAt, bpm: beat && beat.bpm, offset: beat ? beat.offset : 0 } : null);
       Dancer.setMode(awesomes.has(me.id) ? 'dance' : lames.has(me.id) ? 'sulk' : c ? 'groove' : 'chill');
       Dancer.setRoom({ people: room.listeners.length, awesome: awesomes.size, lame: lames.size });
+      // Everyone in the room gets a figure of their own, in their mood.
+      const mood = (id) => (awesomes.has(id) ? 'dance' : lames.has(id) ? 'sulk' : c ? 'groove' : 'chill');
+      const ids = [...new Set([...room.listeners, ...room.djs])];
+      if (Dancer.setUsers) Dancer.setUsers(ids.map((id) => ({ id, name: userName(id), mode: mood(id), me: id === me.id })));
     }
 
     $('#online-count').textContent = `${room.listeners.length} here`;

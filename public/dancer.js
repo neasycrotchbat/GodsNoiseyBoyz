@@ -42,8 +42,12 @@ const MOVES = {
 const SEG = { dance: 8, groove: 16, chill: 16, sulk: 16 }; // beats a figure keeps a move for (or twice that)
 const TINTS = [0x1b1430, 0x161a33, 0x241530, 0x121d2c, 0x201a2e]; // shades the crowd comes in
 const ME_TINT = 0x5a40b0; // you stand out from the crowd
+// Where the other people in the room stand: around you, between the crowd's
+// rows, in the order they arrive. More people than spots and the crowd stands
+// in for the rest.
+const USER_SPOTS = [[-1, 0.15], [1, 0.15], [-2, 0.1], [2, 0.1], [-0.55, -0.6], [0.55, -0.6], [-1.5, -0.55], [1.5, -0.55], [-2.5, -0.5], [2.5, -0.5], [-3, 0.2], [3, 0.2]];
 
-const Dancer = Object.assign(window.Dancer || {}, { setSong, setMode, setRoom, react, show, ready: false });
+const Dancer = Object.assign(window.Dancer || {}, { setSong, setMode, setRoom, setUsers, react, show, ready: false });
 window.Dancer = Dancer;
 
 // ------------------------------------------------------------ the silhouette
@@ -485,29 +489,33 @@ function bakeClip(name, { beats, pose }, mirror = false, fps = 30) {
 // ------------------------------------------------------------ scene
 let renderer, scene, camera;
 const clips = {}, clipsM = {}, beatsOf = {}, onceOf = new Set(); // clipsM: the same moves, mirrored
-const dancers = []; // [0] is you, the rest are the crowd
-let me = null, crowd = [];
+const dancers = []; // [0] is you, then figures for the other people in the room, then the crowd
+let me = null, pool = [], crowd = [];
 let song = null;     // { key, beatMs, beat0 }
 let shares = { dance: 0.25, sulk: 0 }; // how much of the crowd is dancing or sulking
 let lastT = 0;
 let visible = true;
 
 // A figure on the floor with its own skeleton, mixer, moves and timing.
-function makeDancer(idx, x, z, rand) {
+// kind: 'me', 'user' (one of the people in the room; sits idle and unseen
+// until someone arrives to fill it) or 'crowd'.
+function makeDancer(idx, x, z, rand, kind) {
   const root = buildSkeleton();
   root.position.set(x, 0, z);
-  root.rotation.y = idx ? rad(rand() * 30 - 15) : 0;
-  root.scale.setScalar(idx ? 0.88 + rand() * 0.14 : 1);
+  const isCrowd = kind === 'crowd';
+  root.rotation.y = isCrowd ? rad(rand() * 30 - 15) : 0;
+  root.scale.setScalar(isCrowd ? 0.88 + rand() * 0.14 : 1);
   const joints = {};
   for (const j of JOINTS) joints[j] = root.getObjectByName(j);
   const mixer = new THREE.AnimationMixer(root);
-  // What makes this one move differently from the next: the crowd is split
-  // between the two hands, each figure is a little early or late (a few on
-  // the off-beat or a whole beat out), and some move smaller than others.
-  const mirror = idx ? rand() < 0.5 : false;
-  const roll = idx ? rand() : 0;
-  const shift = !idx ? 0 : roll < 0.6 ? (rand() - 0.5) * 0.25 : roll < 0.85 ? 0.5 + (rand() - 0.5) * 0.2 : 1 + (rand() - 0.5) * 0.2;
-  const energy = idx ? 0.6 + rand() * 0.4 : 1;
+  // What makes one crowd figure move differently from the next: the crowd is
+  // split between the two hands, each figure is a little early or late (a few
+  // on the off-beat or a whole beat out), and some move smaller than others.
+  // People's own figures dance full size, square on the beat.
+  const mirror = isCrowd ? rand() < 0.5 : false;
+  const roll = isCrowd ? rand() : 0;
+  const shift = !isCrowd ? 0 : roll < 0.6 ? (rand() - 0.5) * 0.25 : roll < 0.85 ? 0.5 + (rand() - 0.5) * 0.2 : 1 + (rand() - 0.5) * 0.2;
+  const energy = isCrowd ? 0.6 + rand() * 0.4 : 1;
   const actions = {};
   for (const [name, clip] of Object.entries(mirror ? clipsM : clips)) {
     const a = mixer.clipAction(clip);
@@ -517,7 +525,7 @@ function makeDancer(idx, x, z, rand) {
   // The mixer averages running actions by weight, so a standing-easy action
   // left running at a fixed weight scales every move toward it.
   if (energy < 1) { actions.rest.setEffectiveWeight(1 / energy - 1); actions.rest.play(); }
-  return { idx, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, shift, energy, mirror };
+  return { idx, kind, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, shift, energy, mirror, active: kind !== 'user' };
 }
 // Where the crowd stands: the few under the camera, the rows in front of
 // you, then rows behind you, each as wide as the floor is in view at that
@@ -582,10 +590,12 @@ function init() {
     if (def.once) onceOf.add(name);
   }
   const rand = seedRand('crowd');
-  dancers.push(makeDancer(0, 0, 0, rand));
-  for (const { x, z } of crowdSpots(CROWD)) dancers.push(makeDancer(dancers.length, x + (rand() - 0.5) * 0.2, z + (rand() - 0.5) * 0.25, rand));
+  dancers.push(makeDancer(0, 0, 0, rand, 'me'));
+  for (const [x, z] of USER_SPOTS) dancers.push(makeDancer(dancers.length, x, z, rand, 'user'));
+  for (const { x, z } of crowdSpots(CROWD)) dancers.push(makeDancer(dancers.length, x + (rand() - 0.5) * 0.2, z + (rand() - 0.5) * 0.25, rand, 'crowd'));
   me = dancers[0];
-  crowd = dancers.slice(1);
+  pool = dancers.filter((d) => d.kind === 'user');
+  crowd = dancers.filter((d) => d.kind === 'crowd');
   // One instanced mesh per body part draws that part for every figure.
   const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.1 });
   const tint = new THREE.Color();
@@ -593,7 +603,7 @@ function init() {
     p.mesh = new THREE.InstancedMesh(p.geo, skin, dancers.length);
     p.mesh.castShadow = true;
     p.mesh.frustumCulled = false; // instances are spread over the floor; the geometry's own bounds mean nothing
-    for (const d of dancers) p.mesh.setColorAt(d.idx, tint.setHex(d.idx ? TINTS[d.idx % TINTS.length] : ME_TINT));
+    for (const d of dancers) p.mesh.setColorAt(d.idx, tint.setHex(d.kind === 'me' ? ME_TINT : TINTS[d.idx % TINTS.length]));
     scene.add(p.mesh);
   }
 
@@ -655,12 +665,13 @@ function moodCrowd() {
   }
 }
 // A one-off reaction (cheer, jump, clap, boo...) for ms, then back to dancing.
-// who: 'me' (yours), 'crowd' (someone else's: some of the crowd join in,
-// staggered) or 'all'.
+// who: a user id (their figure does it, and some of the crowd join in,
+// staggered), 'me' (yours alone), 'crowd' (just the crowd) or 'all'.
 function react(clip, ms, delay = 0, who = 'me') {
   if (!clips[clip]) return;
-  if (who !== 'crowd' && me) schedule(me, clip, ms, delay);
-  if (who !== 'me') for (const d of crowd) if (Math.random() < 0.4) schedule(d, clip, ms, delay + Math.random() * 500);
+  const fig = who === 'me' || who === 'all' ? me : who === 'crowd' ? null : users.get(who);
+  if (fig) schedule(fig, clip, ms, delay);
+  if (who === 'all' || (who !== 'me' && fig !== me)) for (const d of crowd) if (Math.random() < 0.4) schedule(d, clip, ms, delay + Math.random() * 500);
 }
 function schedule(d, name, ms, delay) {
   if (delay > 0) { setTimeout(() => schedule(d, name, ms, 0), delay); return; }
@@ -680,12 +691,74 @@ Dancer.state = () => {
   for (const d of crowd) moods[d.mode] = (moods[d.mode] || 0) + 1;
   return {
     song, me: me.mode, crowd: moods, figures: dancers.length,
+    users: [...users].map(([id, d]) => `${d.name || id}:${d.mode}:${d.current ? d.current.name : '-'}`),
     actions: Object.entries(me.actions).filter(([, a]) => a.isRunning() && a.getEffectiveWeight() > 0)
       .map(([n, a]) => `${n} w=${a.getEffectiveWeight().toFixed(2)} t=${a.time.toFixed(2)} x${a.timeScale.toFixed(2)}`),
   };
 };
 Dancer.moves = () => Object.keys(clips);
-Dancer.debug = () => ({ camera, dancers, renderer }); // for poking at the scene from the console
+Dancer.debug = () => ({ camera, dancers, renderer, users }); // for poking at the scene from the console
+
+// ---- the people in the room (set by app.js)
+// Each person gets a figure of their own near yours, in their own colour and
+// with their name over it, that dances to their mood and does their emotes.
+const users = new Map(); // user id -> figure
+const tags = new THREE.Scene(); // the name tags, drawn over everything
+function setUsers(list) {
+  const seen = new Set();
+  for (const u of list) {
+    seen.add(u.id);
+    let d = users.get(u.id);
+    if (!d) {
+      d = u.me ? me : pool.find((p) => !p.active);
+      if (!d) continue; // more people than spots: the crowd stands in for them
+      users.set(u.id, d);
+      d.active = true;
+      tint(d, u.me ? new THREE.Color(ME_TINT) : colorFor(u.id));
+    }
+    if (d.name !== u.name) label(d, u.name);
+    d.mode = MOVES[u.mode] ? u.mode : 'chill';
+  }
+  for (const [id, d] of users) {
+    if (seen.has(id)) continue;
+    users.delete(id);
+    if (d === me) continue;
+    d.active = false;
+    d.current = null;
+    d.reaction = null;
+    d.mixer.stopAllAction();
+    label(d, null);
+  }
+}
+function tint(d, color) {
+  for (const p of PARTS) { p.mesh.setColorAt(d.idx, color); p.mesh.instanceColor.needsUpdate = true; }
+}
+// A colour of their own from their id: a mid-bright hue, so they read against
+// the dark crowd without outshining you.
+function colorFor(id) {
+  return new THREE.Color().setHSL((hashStr(id) % 360) / 360, 0.6, 0.42);
+}
+function label(d, name) {
+  if (d.tag) { tags.remove(d.tag); d.tag.material.map.dispose(); d.tag.material.dispose(); d.tag = null; }
+  d.name = name;
+  if (!name) return;
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 30px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.lineWidth = 6;
+  g.strokeStyle = 'rgba(10, 6, 24, 0.85)';
+  g.strokeText(name, 128, 32, 240);
+  g.fillStyle = '#fff';
+  g.fillText(name, 128, 32, 240);
+  const map = new THREE.CanvasTexture(c);
+  map.colorSpace = THREE.SRGBColorSpace;
+  d.tag = new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthTest: false, toneMapped: false }));
+  d.tag.scale.set(0.8, 0.2, 1);
+  tags.add(d.tag);
+}
 
 // ---- choreography: a seeded plan per figure, song and mood, so every client agrees
 function hashStr(str) {
@@ -754,6 +827,7 @@ function play(d, { name, start }, t) {
 function update(t, dt) {
   const beatMs = song ? song.beatMs : REF_BEAT * 1000;
   for (const d of dancers) {
+    if (!d.active) continue;
     const td = t - d.shift * beatMs; // this figure's own idea of where the beat is
     const w = wanted(d, td);
     if (!d.current || d.current.name !== w.name) play(d, w, td);
@@ -809,23 +883,34 @@ function setupDof() {
 Dancer.dof = (on = !DOF.on) => { DOF.on = on; };
 
 // Put every figure's parts where its joints are, then render.
-const partM = new THREE.Matrix4();
+const partM = new THREE.Matrix4(), GONE = new THREE.Matrix4().makeScale(0, 0, 0);
 function draw() {
-  for (const d of dancers) d.root.updateMatrixWorld(true);
+  for (const d of dancers) {
+    if (!d.active) continue;
+    d.root.updateMatrixWorld(true);
+    if (d.tag) d.tag.position.setFromMatrixPosition(d.joints.neck.matrixWorld).y += 0.45;
+  }
   for (const p of PARTS) {
-    for (const d of dancers) p.mesh.setMatrixAt(d.idx, partM.multiplyMatrices(d.joints[p.joint].matrixWorld, p.local));
+    for (const d of dancers) p.mesh.setMatrixAt(d.idx, d.active ? partM.multiplyMatrices(d.joints[p.joint].matrixWorld, p.local) : GONE);
     p.mesh.instanceMatrix.needsUpdate = true;
   }
   renderer.shadowMap.needsUpdate = true;
-  if (!DOF.on) { renderer.setRenderTarget(null); renderer.render(scene, camera); return; }
-  renderer.setRenderTarget(dof.color);
-  renderer.render(scene, camera);
-  scene.overrideMaterial = dof.depthMat;
-  renderer.setRenderTarget(dof.depth);
-  renderer.render(scene, camera);
-  scene.overrideMaterial = null;
-  renderer.setRenderTarget(null);
-  renderer.render(dof.quad, dof.cam);
+  if (DOF.on) {
+    renderer.setRenderTarget(dof.color);
+    renderer.render(scene, camera);
+    scene.overrideMaterial = dof.depthMat;
+    renderer.setRenderTarget(dof.depth);
+    renderer.render(scene, camera);
+    scene.overrideMaterial = null;
+    renderer.setRenderTarget(null);
+    renderer.render(dof.quad, dof.cam);
+  } else {
+    renderer.setRenderTarget(null);
+    renderer.render(scene, camera);
+  }
+  renderer.autoClear = false; // the name tags go on top, sharp, after the blur
+  renderer.render(tags, camera);
+  renderer.autoClear = true;
 }
 function tick() {
   requestAnimationFrame(tick);
