@@ -12,28 +12,24 @@
    of its own, so the crowd moves together without moving in lockstep.
 
    The legs are never posed by hand: a pose says where the hips and the feet
-   are, and the knees are solved to connect them, so the feet stay planted. */
+   are, and the knees are solved to connect them, so the feet stay planted.
+   Drawing is instanced: each body part is one draw call for the whole crowd,
+   so the floor costs about the same with sixty figures as with one. */
 import * as THREE from 'three';
 
 const REF_BEAT = 0.5; // clips are authored at 120 BPM: one beat is 0.5 s
 const FADE = 0.35;    // seconds to blend from one move into the next
+const CROWD = 60;     // how many figures stand behind you
 // Which moves each mood draws from. A move repeated in a list is just more likely.
 const MOVES = {
-  dance: ['bounce', 'roof', 'twist', 'step', 'pump', 'shuffle', 'kick', 'point', 'wave', 'sway', 'rock', 'disco'],
-  groove: ['groove', 'sway', 'bob', 'step', 'rock', 'bob', 'groove'],
+  dance: ['bounce', 'roof', 'twist', 'step', 'pump', 'shuffle', 'kick', 'point', 'wave', 'sway', 'rock', 'disco', 'robot', 'turn', 'spin', 'turn'],
+  groove: ['groove', 'sway', 'bob', 'step', 'rock', 'bob', 'groove', 'swing'],
   chill: ['idle', 'look', 'phone', 'tap', 'stretch', 'idle'],
   sulk: ['boo', 'crossed', 'slump'],
 };
 const SEG = { dance: 8, groove: 16, chill: 16, sulk: 16 }; // beats a figure keeps a move for (or twice that)
-// Where the crowd stands, in rows behind you (you're at the origin), and the
-// shades the figures come in.
-const ROWS = [
-  { z: -1.1, xs: [-2.85, -1.9, -0.95, 0.95, 1.9, 2.85] },
-  { z: -2.0, xs: [-3.35, -2.4, -1.45, -0.5, 0.5, 1.45, 2.4, 3.35] },
-  { z: -2.9, xs: [-3.8, -2.85, -1.9, -0.95, 0, 0.95, 1.9, 2.85, 3.8] },
-];
-const TINTS = [0x1b1430, 0x161a33, 0x241530, 0x121d2c, 0x201a2e];
-const ME_TINT = { color: 0x4b3590, emissive: 0x160b2e }; // you stand out from the crowd
+const TINTS = [0x1b1430, 0x161a33, 0x241530, 0x121d2c, 0x201a2e]; // shades the crowd comes in
+const ME_TINT = 0x5a40b0; // you stand out from the crowd
 
 const Dancer = Object.assign(window.Dancer || {}, { setSong, setMode, setRoom, react, show, ready: false });
 window.Dancer = Dancer;
@@ -42,7 +38,9 @@ window.Dancer = Dancer;
 // A figure of capsules hung on named joints. Limbs hang along their joint's
 // -Y axis in the rest pose (arms by the sides, legs straight), so a joint's
 // rotation about X swings the limb forward (negative) and back, and about Z
-// swings it out to the side (negative for the left side).
+// swings it out to the side (negative for the left side). Each figure has its
+// own skeleton of plain Object3Ds; the parts themselves are drawn once for
+// the whole crowd (see PARTS).
 const JOINTS = ['hips', 'spine', 'neck', 'armL', 'foreL', 'armR', 'foreR', 'legL', 'shinL', 'footL', 'legR', 'shinR', 'footR'];
 const HIP_Y = 0.95;
 const SOCKET = { x: 0.09, y: -0.02 }; // where each leg hangs from the hips
@@ -57,44 +55,39 @@ function joint(name, parent, x, y, z) {
   parent.add(o);
   return o;
 }
-// A capsule hanging from (or standing on, if up) its joint.
-function limb(parent, mat, r, len, up = false) {
-  const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.01, len - 2 * r), 4, 12), mat);
-  m.position.y = up ? len / 2 : -len / 2;
-  m.castShadow = true;
-  parent.add(m);
-  return m;
-}
-function buildSilhouette(mat) {
+function buildSkeleton() {
   const root = new THREE.Group();
   const hips = joint('hips', root, 0, HIP_Y, 0);
-  const pelvis = limb(hips, mat, 0.13, 0.3, true);
-  pelvis.rotation.z = Math.PI / 2; // lying across the hips
-  pelvis.position.set(0, 0.01, 0);
   const spine = joint('spine', hips, 0, 0.04, 0);
-  limb(spine, mat, 0.135, 0.52, true);
-  const neck = joint('neck', spine, 0, 0.5, 0);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 20, 14), mat);
-  head.position.y = 0.17;
-  head.castShadow = true;
-  neck.add(head);
+  joint('neck', spine, 0, 0.5, 0);
   for (const side of ['L', 'R']) {
     const s = side === 'L' ? -1 : 1;
     const arm = joint('arm' + side, spine, s * 0.2, 0.45, 0);
-    limb(arm, mat, 0.05, 0.3);
-    const fore = joint('fore' + side, arm, 0, -0.3, 0);
-    limb(fore, mat, 0.046, 0.32); // forearm and hand
+    joint('fore' + side, arm, 0, -0.3, 0);
     const leg = joint('leg' + side, hips, s * SOCKET.x, SOCKET.y, 0);
-    limb(leg, mat, 0.07, THIGH);
     const shin = joint('shin' + side, leg, 0, -THIGH, 0);
-    limb(shin, mat, 0.055, SHIN);
-    const foot = joint('foot' + side, shin, 0, -SHIN, 0); // the ankle
-    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.24), mat);
-    sole.position.set(0, 0, 0.06);
-    sole.castShadow = true;
-    foot.add(sole);
+    joint('foot' + side, shin, 0, -SHIN, 0); // the ankle
   }
   return root;
+}
+// The body parts: a geometry, the joint it hangs on, and where it sits on it.
+const cap = (r, len) => new THREE.CapsuleGeometry(r, Math.max(0.01, len - 2 * r), 4, 12);
+const PARTS = [
+  { joint: 'hips', geo: cap(0.13, 0.3), at: [0, 0.01, 0], roll: 90 }, // the pelvis, lying across the hips
+  { joint: 'spine', geo: cap(0.135, 0.52), at: [0, 0.26, 0] },
+  { joint: 'neck', geo: new THREE.SphereGeometry(0.115, 20, 14), at: [0, 0.17, 0] },
+];
+for (const side of ['L', 'R']) {
+  PARTS.push(
+    { joint: 'arm' + side, geo: cap(0.05, 0.3), at: [0, -0.15, 0] },
+    { joint: 'fore' + side, geo: cap(0.046, 0.32), at: [0, -0.16, 0] }, // forearm and hand
+    { joint: 'leg' + side, geo: cap(0.07, THIGH), at: [0, -THIGH / 2, 0] },
+    { joint: 'shin' + side, geo: cap(0.055, SHIN), at: [0, -SHIN / 2, 0] },
+    { joint: 'foot' + side, geo: new THREE.BoxGeometry(0.1, 0.06, 0.24), at: [0, 0, 0.06] },
+  );
+}
+for (const p of PARTS) {
+  p.local = new THREE.Matrix4().compose(new THREE.Vector3(...p.at), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, THREE.MathUtils.degToRad(p.roll || 0))), new THREE.Vector3(1, 1, 1));
 }
 
 // ------------------------------------------------------------ legs
@@ -111,15 +104,16 @@ function limbQuat(dir, fwd) {
   return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
 }
 // Rotations for one leg that put its ankle at target (a point in the room)
-// given where the hips are: the knee bends forward and a little out, and the
-// foot sits flat, turned by yaw degrees. Writes leg, shin and foot into out.
-function solveLeg(side, hipPos, hipQ, target, yaw, out) {
+// given where the hips are: the knee bends forward (the way the body faces,
+// facing) and a little out, and the foot sits flat, turned by yaw degrees.
+// Writes leg, shin and foot into out.
+function solveLeg(side, hipPos, hipQ, target, yaw, facing, out) {
   const s = side === 'L' ? -1 : 1;
   const socket = new THREE.Vector3(s * SOCKET.x, SOCKET.y, 0).applyQuaternion(hipQ).add(hipPos);
   const d = new THREE.Vector3().subVectors(target, socket);
   const reach = THREE.MathUtils.clamp(d.length(), 0.1, THIGH + SHIN - 0.003); // out of reach: the foot comes up a touch
   d.normalize();
-  const pole = new THREE.Vector3(s * 0.3, 0, 1).normalize(); // which way the knee points
+  const pole = new THREE.Vector3(s * 0.3, 0, 1).normalize().applyQuaternion(facing); // which way the knee points
   // Law of cosines: how far the thigh swings off the hip-to-ankle line toward the knee's side.
   const bend = Math.acos(THREE.MathUtils.clamp((THIGH * THIGH + reach * reach - SHIN * SHIN) / (2 * THIGH * reach), -1, 1));
   const axis = new THREE.Vector3().crossVectors(d, pole).normalize();
@@ -137,10 +131,11 @@ function solveLeg(side, hipPos, hipQ, target, yaw, out) {
 // Each pose function takes b, the position in beats through the clip, and
 // returns joint rotations in degrees [x, y, z] for the body and arms, an
 // offset of the hips (x, y, z), and optionally where the ankles are (ankleL,
-// ankleR, points in the room; on the floor in a natural stance by default)
-// and how far the toes turn (toesL, toesR). They're periodic in the clip's
-// length, so every loop is seamless. All of them stay on the spot, so they
-// work in a crowd.
+// ankleR, points on the floor in a natural stance by default), how far the
+// toes turn (toesL, toesR) and which way the whole figure faces (turn, in
+// degrees; everything else in the pose is then relative to that facing).
+// They're periodic in the clip's length, so every loop is seamless. All of
+// them stay on the spot, so they work in a crowd.
 const S = (b, per = 1, ph = 0) => Math.sin(2 * Math.PI * (b / per + ph));
 const C = (b, per = 1, ph = 0) => Math.cos(2 * Math.PI * (b / per + ph));
 const dip = (b) => (1 + C(b)) / 2;        // 1 on every beat, 0 between
@@ -148,20 +143,52 @@ const half = (b, per) => Math.max(0, S(b, per)); // the first half of a cycle, a
 const lerp = (a, b, k) => a + (b - a) * k;
 const lerpA = (a, b, k) => a.map((v, i) => lerp(v, b[i], k));
 const ease = (k) => 1 - (1 - k) * (1 - k);
+const smooth = (k) => (k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) * (1 - k));
+const mod = (a, b) => ((a % b) + b) % b;
+const rad = THREE.MathUtils.degToRad;
 // Hips lowered to bend the knees by k: 0 straight, 1 an easy bend, 2 a crouch.
 const crouch = (k) => ({ y: -0.075 * k });
 // An ankle for side s: out from its stance, up off the floor, forward.
 const ankle = (s, out = 0, up = 0, fwd = 0) => [s * (STANCE + out), ANKLE_Y + up, fwd];
 // Arms hanging loose at the sides, swinging forward by sw degrees (left one first).
 const loose = (sw = 0, bend = 15) => ({ armL: [sw, 0, -8], foreL: [-bend, 0, 0], armR: [-sw, 0, 8], foreR: [-bend, 0, 0] });
+// A yaw curve over one loop of `beats`, carried on round `turns` full turns
+// per loop so it can be read a little before or after the loop.
+const yawLoop = (fn, beats, turns = 0) => (b) => fn(mod(b, beats)) + 360 * turns * Math.floor(b / beats);
+// A foot that only moves while it's in the air. It lifts for half a beat at
+// each beat in `lifts`, landing turned to where the body's yaw has got to,
+// and stays put in the room until its next lift. Returns the ankle and toes
+// relative to the body, which is facing yaw(b).
+function footAt(s, b, yaw, lifts, beats) {
+  let prev = -Infinity;
+  for (const l of lifts) if (l <= b && l > prev) prev = l;
+  if (prev === -Infinity) prev = Math.max(...lifts) - beats; // still planted from the previous loop
+  const k = Math.min(1, (b - prev) / 0.5);
+  const planted = lerp(yaw(prev), yaw(prev + 0.5), ease(k)); // where the foot points, in the room
+  const up = k < 1 ? 0.07 * Math.sin(Math.PI * k) : 0;
+  const rel = rad(planted - yaw(b));
+  return { ankle: [s * STANCE * Math.cos(rel), ANKLE_Y + up, -s * STANCE * Math.sin(rel)], toes: s * 6 + planted - yaw(b) };
+}
+// A point in the room, as the body sees it when facing yaw degrees.
+const inBody = (x, z, yaw) => { const r = rad(yaw); return [x * Math.cos(r) - z * Math.sin(r), x * Math.sin(r) + z * Math.cos(r)]; };
 
-// The robot's key poses: it snaps from one to the next on each beat.
+// The robot's key poses: it snaps from one to the next on each beat, facing
+// one way for four beats then the other, bending oddly at the waist.
 const ROBOT = [
-  { armL: [-90, 0, 0], foreL: [0, 0, -90], armR: [-90, 0, 0], foreR: [-90, 0, 0], neck: [0, 25, 0], spine: [0, 0, 0] },
-  { armL: [-90, 0, 0], foreL: [-90, 0, 0], armR: [-90, 0, 0], foreR: [0, 0, 90], neck: [0, -25, 0], spine: [0, 0, 0] },
-  { armL: [0, 0, -90], foreL: [-90, 0, 0], armR: [-90, 0, 0], foreR: [-90, 0, 0], neck: [15, 0, 0], spine: [0, 12, 0] },
-  { armL: [-90, 0, 0], foreL: [-90, 0, 0], armR: [0, 0, 90], foreR: [-90, 0, 0], neck: [-10, 0, 0], spine: [0, -12, 0] },
+  { armL: [-90, 0, 0], foreL: [0, 0, -90], armR: [-90, 0, 0], foreR: [-90, 0, 0], neck: [0, 25, 0], spine: [10, 0, -20] },
+  { armL: [-90, 0, 0], foreL: [-90, 0, 0], armR: [-90, 0, 0], foreR: [0, 0, 90], neck: [0, -25, 0], spine: [-5, 0, 20] },
+  { armL: [0, 0, -90], foreL: [-90, 0, 0], armR: [-90, 0, 0], foreR: [-90, 0, 0], neck: [15, 0, 0], spine: [25, 15, 0] },
+  { armL: [-90, 0, 0], foreL: [-90, 0, 0], armR: [0, 0, 90], foreR: [-90, 0, 0], neck: [-10, 0, 0], spine: [0, -15, 25] },
+  { armL: [-90, 0, 0], foreL: [-90, 0, 0], armR: [-90, 0, 0], foreR: [-90, 0, 0], neck: [0, 0, 20], spine: [32, 0, 0] },
+  { armL: [-90, 0, 0], foreL: [0, 0, -90], armR: [0, 0, 90], foreR: [-90, 0, 0], neck: [0, 0, -20], spine: [-10, 20, -22] },
+  { armL: [-45, 0, -60], foreL: [-120, 0, 0], armR: [-45, 0, 60], foreR: [-120, 0, 0], neck: [20, 0, 0], spine: [20, 0, 15] },
+  { armL: [-90, 0, 0], foreL: [-90, 0, 0], armR: [-90, 0, 0], foreR: [0, 0, 90], neck: [-15, 0, 0], spine: [-5, -20, -25] },
 ];
+const ROBOT_FACE = (i) => (mod(i, 8) < 4 ? 70 : -70);
+// The turn: a half turn in four stepping beats, four beats grooving with your
+// back to the booth, a half turn on round, four beats facing front again.
+const TURN_YAW = yawLoop((b) => (b < 4 ? 45 * b : b < 8 ? 180 : b < 12 ? 180 + 45 * (b - 8) : 360), 16, 1);
+const SWING_YAW = yawLoop((b) => 35 * S(b, 8), 8);
 
 const POSES = {
   // ---- idling between songs
@@ -236,6 +263,17 @@ const POSES = {
       armL: [-25 - 20 * sw, 0, -15], foreL: [-60, 0, 10], armR: [-25 + 20 * sw, 0, 15], foreR: [-60, 0, -10],
     };
   } },
+  // Swinging round to face one side then the other, feet shuffling after.
+  swing: { beats: 8, pose: (b) => {
+    const d = dip(b), sw = S(b, 2), yaw = SWING_YAW(b);
+    const L = footAt(-1, b, SWING_YAW, [0, 2, 4, 6], 8), R = footAt(1, b, SWING_YAW, [1, 3, 5, 7], 8);
+    return {
+      ...crouch(0.4 + 0.35 * d), turn: yaw,
+      hips: [0, 5 * sw, 0], spine: [4 + 2 * d, 8 * S(b, 8), 3 * sw], neck: [8 * d - 3, -10 * S(b, 8), 0],
+      ankleL: L.ankle, ankleR: R.ankle, toesL: L.toes, toesR: R.toes,
+      armL: [8 * sw, 0, -12], foreL: [-35 - 10 * d, 0, 0], armR: [-8 * sw, 0, 12], foreR: [-35 - 10 * d, 0, 0],
+    };
+  } },
 
   // ---- dancing
   // Big bounce with fists pumping.
@@ -295,12 +333,46 @@ const POSES = {
     hips: [0, -15 * ph, 4 * ph], spine: [4, 10 * ph, -9 * ph], neck: [-6 * up, 22 * ph, 0],
     armL: [0, 0, -25], foreL: [-40, 0, 70], armR: [-40 + 10 * up, 0, -25 + 165 * up], foreR: [-8, 0, 0],
   }; } },
-  // The robot: stiff, snapping from pose to pose on each beat.
-  robot: { beats: 4, pose: (b) => {
-    const i = Math.floor(b) % 4, k = ease(Math.min(1, (b % 1) / 0.25)), from = ROBOT[(i + 3) % 4], to = ROBOT[i];
-    const out = { ...crouch(0.5), hips: [0, 0, 0] };
+  // The robot: stiff, snapping from pose to pose on each beat, turned side-on
+  // and bending oddly at the waist; it hops round to face the other side
+  // halfway through.
+  robot: { beats: 8, pose: (b) => {
+    const i = Math.floor(b) % 8, k = ease(Math.min(1, (b % 1) / 0.25)), from = ROBOT[(i + 7) % 8], to = ROBOT[i];
+    const out = { ...crouch(0.5), hips: [0, 0, 0], turn: lerp(ROBOT_FACE(i - 1), ROBOT_FACE(i), k) };
     for (const j of ['armL', 'foreL', 'armR', 'foreR', 'neck', 'spine']) out[j] = lerpA(from[j], to[j], k);
+    if (ROBOT_FACE(i) !== ROBOT_FACE(i - 1) && k < 1) { // the hop round
+      const hop = 0.05 * Math.sin(Math.PI * k);
+      out.ankleL = ankle(-1, 0, hop); out.ankleR = ankle(1, 0, hop); out.y -= 0.02 * Math.sin(Math.PI * k);
+    }
     return out;
+  } },
+  // Turning round: half a turn in four stepping beats, four beats grooving with
+  // your back to the booth, then on round to the front and four beats there.
+  turn: { beats: 16, pose: (b) => {
+    const d = dip(b), sw = S(b, 2);
+    const L = footAt(-1, b, TURN_YAW, [1, 3, 5, 9, 11, 13], 16), R = footAt(1, b, TURN_YAW, [0, 2, 4, 8, 10, 12], 16);
+    return {
+      ...crouch(0.4 + 0.4 * d), turn: TURN_YAW(b),
+      hips: [0, 6 * sw, 0], spine: [4 + 3 * d, -6 * sw, 4 * sw], neck: [8 * d - 3, 4 * sw, 0],
+      ankleL: L.ankle, ankleR: R.ankle, toesL: L.toes, toesR: R.toes,
+      armL: [-20 - 25 * sw, 0, -14], foreL: [-70, 0, 8], armR: [-20 + 25 * sw, 0, 14], foreR: [-70, 0, -8],
+    };
+  } },
+  // A spin: wind up with the arms out, whip round once on the left foot with
+  // the right tucked up, land and settle.
+  spin: { beats: 4, pose: (b) => {
+    let yaw, arms, air = 0;
+    if (b < 1) { yaw = -25 * ease(b); arms = ease(b); }
+    else if (b < 2.5) { const k = (b - 1) / 1.5; yaw = -25 + 385 * smooth(k); arms = 1; air = Math.sin(Math.PI * k); }
+    else { yaw = 360; arms = 1 - ease((b - 2.5) / 1.5); }
+    const [hx, hz] = inBody(-0.08 * air, 0, yaw);          // the hips move over the left foot
+    const [fx, fz] = inBody(-STANCE, 0, yaw);              // which stays put in the room
+    return {
+      ...crouch(0.35 + 0.3 * air), x: hx, z: hz, turn: yaw,
+      hips: [0, 0, 0], spine: [2, 0, -3 * air], neck: [-4, 0, 0],
+      ankleL: [fx, ANKLE_Y, fz], ankleR: ankle(1, -0.02 * air, 0.2 * air, -0.06 * air), toesR: 6 - 10 * air,
+      armL: [0, 0, -10 - 75 * arms], foreL: [-15, 0, 0], armR: [0, 0, 10 + 75 * arms], foreR: [-15, 0, 0],
+    };
   } },
 
   // ---- reactions: cheering, clapping, a jump (plays once), and sulking
@@ -354,12 +426,13 @@ function bakeClip(name, { beats, pose }, fps = 30) {
   const n = Math.round(beats * REF_BEAT * fps);
   const times = [], pos = [], rot = {};
   for (const j of JOINTS) rot[j] = [];
-  const e = new THREE.Euler(), rad = THREE.MathUtils.degToRad;
-  const hipPos = new THREE.Vector3(), target = new THREE.Vector3();
+  const e = new THREE.Euler();
+  const hipPos = new THREE.Vector3(), target = new THREE.Vector3(), facing = new THREE.Quaternion();
   for (let i = 0; i <= n; i++) { // the last sample repeats the first so loops are seamless
     const p = pose(((i % n) / n) * beats);
     times.push(i / fps);
-    hipPos.set(p.x || 0, HIP_Y + (p.y || 0), p.z || 0);
+    facing.setFromAxisAngle(Y_UP, rad(p.turn || 0));
+    hipPos.set(p.x || 0, HIP_Y + (p.y || 0), p.z || 0).applyQuaternion(facing);
     pos.push(hipPos.x, hipPos.y, hipPos.z);
     const q = {};
     for (const j of JOINTS) {
@@ -367,10 +440,11 @@ function bakeClip(name, { beats, pose }, fps = 30) {
       e.set(rad(r[0]), rad(r[1]), rad(r[2]));
       q[j] = new THREE.Quaternion().setFromEuler(e);
     }
+    q.hips.premultiply(facing);
     for (const side of ['L', 'R']) {
       const s = side === 'L' ? -1 : 1;
-      target.fromArray(p['ankle' + side] || ankle(s));
-      solveLeg(side, hipPos, q.hips, target, p['toes' + side] ?? s * 6, q);
+      target.fromArray(p['ankle' + side] || ankle(s)).applyQuaternion(facing);
+      solveLeg(side, hipPos, q.hips, target, (p['toes' + side] ?? s * 6) + (p.turn || 0), facing, q);
     }
     for (const j of JOINTS) rot[j].push(q[j].x, q[j].y, q[j].z, q[j].w);
   }
@@ -389,14 +463,14 @@ let shares = { dance: 0.25, sulk: 0 }; // how much of the crowd is dancing or su
 let lastT = 0;
 let visible = true;
 
-// A figure on the floor with its own mixer, moves and timing.
+// A figure on the floor with its own skeleton, mixer, moves and timing.
 function makeDancer(idx, x, z, rand) {
-  const mat = new THREE.MeshStandardMaterial({ ...(idx ? { color: TINTS[idx % TINTS.length] } : ME_TINT), roughness: 0.8, metalness: 0.1 });
-  const root = buildSilhouette(mat);
+  const root = buildSkeleton();
   root.position.set(x, 0, z);
-  root.rotation.y = idx ? THREE.MathUtils.degToRad(rand() * 30 - 15) : 0;
+  root.rotation.y = idx ? rad(rand() * 30 - 15) : 0;
   root.scale.setScalar(idx ? 0.88 + rand() * 0.14 : 1);
-  scene.add(root);
+  const joints = {};
+  for (const j of JOINTS) joints[j] = root.getObjectByName(j);
   const mixer = new THREE.AnimationMixer(root);
   const actions = {};
   for (const [name, clip] of Object.entries(clips)) {
@@ -405,7 +479,25 @@ function makeDancer(idx, x, z, rand) {
     actions[name] = a;
   }
   // The crowd lags the beat by a few ms each, so they move together, not in lockstep.
-  return { idx, root, mixer, actions, mode: 'chill', current: null, reaction: null, lag: idx ? 20 + rand() * 140 : 0 };
+  return { idx, root, joints, mixer, actions, mode: 'chill', current: null, reaction: null, lag: idx ? 20 + rand() * 140 : 0 };
+}
+// Where the crowd stands: rows behind you, each as wide as the floor is in
+// view at that depth, filled from the middle out.
+function crowdSpots(count) {
+  const spots = [];
+  for (let r = 0; spots.length < count && r < 12; r++) {
+    const z = -1.1 - 0.85 * r, w = 0.72 * (5.4 - z); // half the width in view at that depth
+    const n = Math.floor((2 * w) / 0.9) + 1, x0 = -((n - 1) * 0.9) / 2 + (r % 2 ? 0.45 : 0);
+    const xs = [];
+    for (let i = 0; i < n; i++) xs.push(x0 + i * 0.9);
+    xs.sort((a, b) => Math.abs(a) - Math.abs(b));
+    for (const x of xs) {
+      if (spots.length >= count) break;
+      if (r === 0 && Math.abs(x) < 0.7) continue; // leave you room at the front
+      spots.push({ x, z });
+    }
+  }
+  return spots;
 }
 
 function init() {
@@ -424,9 +516,9 @@ function init() {
   // Stage lighting: a warm spot from the front, neon rims from behind so the
   // silhouettes have an edge, and a dim fill so nothing goes fully black.
   scene.add(new THREE.HemisphereLight(0x8a7bb8, 0x120e1d, 0.5));
-  const spot = new THREE.SpotLight(0xffd9a0, 40, 16, 0.75, 0.7, 1.4);
+  const spot = new THREE.SpotLight(0xffd9a0, 40, 18, 0.8, 0.7, 1.4);
   spot.position.set(0.6, 5, 3.2);
-  spot.target.position.set(0, 0.9, -1);
+  spot.target.position.set(0, 0.9, -1.5);
   spot.castShadow = true;
   spot.shadow.mapSize.set(2048, 2048);
   spot.shadow.bias = -0.0004;
@@ -437,7 +529,7 @@ function init() {
   rim2.position.set(2.5, 2, -2.5);
   scene.add(rim, rim2);
   // The floor only catches the shadows: the page shows through everywhere else.
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(7, 48), new THREE.ShadowMaterial({ opacity: 0.45 }));
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(12, 48), new THREE.ShadowMaterial({ opacity: 0.45 }));
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
@@ -449,11 +541,19 @@ function init() {
   }
   const rand = seedRand('crowd');
   dancers.push(makeDancer(0, 0, 0, rand));
-  for (const row of ROWS) for (const x of row.xs) {
-    dancers.push(makeDancer(dancers.length, x + (rand() - 0.5) * 0.2, row.z + (rand() - 0.5) * 0.25, rand));
-  }
+  for (const { x, z } of crowdSpots(CROWD)) dancers.push(makeDancer(dancers.length, x + (rand() - 0.5) * 0.2, z + (rand() - 0.5) * 0.25, rand));
   me = dancers[0];
   crowd = dancers.slice(1);
+  // One instanced mesh per body part draws that part for every figure.
+  const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.1 });
+  const tint = new THREE.Color();
+  for (const p of PARTS) {
+    p.mesh = new THREE.InstancedMesh(p.geo, skin, dancers.length);
+    p.mesh.castShadow = true;
+    p.mesh.frustumCulled = false; // instances are spread over the floor; the geometry's own bounds mean nothing
+    for (const d of dancers) p.mesh.setColorAt(d.idx, tint.setHex(d.idx ? TINTS[d.idx % TINTS.length] : ME_TINT));
+    scene.add(p.mesh);
+  }
 
   const fit = () => {
     const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
@@ -471,7 +571,6 @@ function init() {
 }
 
 const now = () => (Dancer.now ? Dancer.now() : Date.now());
-const mod = (a, b) => ((a % b) + b) % b;
 // Where the song is, in beats (fractional; negative before the first beat).
 const beatAt = (t) => (song ? (t - song.beat0) / song.beatMs : t / (REF_BEAT * 1000));
 // Playback speed that puts one of the clip's beats on one of the song's.
@@ -528,14 +627,18 @@ function show(clip, everyone = false) {
   for (const d of everyone ? dancers : [me]) d.reaction = clips[clip] ? { name: clip, until: Infinity } : null;
 }
 // Advance by s seconds and draw, for checking poses from the console.
-Dancer.step = (s) => { update(now(), s); renderer.render(scene, camera); };
-Dancer.state = () => ({
-  song, me: me.mode, crowd: crowd.map((d) => `${d.mode}:${d.current ? d.current.name : '-'}`).join(' '),
-  actions: Object.entries(me.actions).filter(([, a]) => a.isRunning() && a.getEffectiveWeight() > 0)
-    .map(([n, a]) => `${n} w=${a.getEffectiveWeight().toFixed(2)} t=${a.time.toFixed(2)} x${a.timeScale.toFixed(2)}`),
-});
+Dancer.step = (s) => { update(now(), s); draw(); };
+Dancer.state = () => {
+  const moods = {};
+  for (const d of crowd) moods[d.mode] = (moods[d.mode] || 0) + 1;
+  return {
+    song, me: me.mode, crowd: moods, figures: dancers.length,
+    actions: Object.entries(me.actions).filter(([, a]) => a.isRunning() && a.getEffectiveWeight() > 0)
+      .map(([n, a]) => `${n} w=${a.getEffectiveWeight().toFixed(2)} t=${a.time.toFixed(2)} x${a.timeScale.toFixed(2)}`),
+  };
+};
 Dancer.moves = () => Object.keys(clips);
-Dancer.debug = () => ({ camera, dancers }); // for poking at the scene from the console
+Dancer.debug = () => ({ camera, dancers, renderer }); // for poking at the scene from the console
 
 // ---- choreography: a seeded plan per figure, song and mood, so every client agrees
 function hashStr(str) {
@@ -601,6 +704,16 @@ function update(t, dt) {
     d.mixer.update(dt);
   }
 }
+// Put every figure's parts where its joints are, then render.
+const partM = new THREE.Matrix4();
+function draw() {
+  for (const d of dancers) d.root.updateMatrixWorld(true);
+  for (const p of PARTS) {
+    for (const d of dancers) p.mesh.setMatrixAt(d.idx, partM.multiplyMatrices(d.joints[p.joint].matrixWorld, p.local));
+    p.mesh.instanceMatrix.needsUpdate = true;
+  }
+  renderer.render(scene, camera);
+}
 function tick() {
   requestAnimationFrame(tick);
   if (document.hidden || !visible) { lastT = now(); return; }
@@ -611,7 +724,7 @@ function tick() {
   const dt = Math.min(2, Math.max(0, (t - lastT) / 1000));
   lastT = t;
   update(t, dt);
-  renderer.render(scene, camera);
+  draw();
 }
 
 init();
